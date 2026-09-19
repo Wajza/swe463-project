@@ -32,11 +32,11 @@ Young adults and university students in major Saudi cities such as Riyadh, Jedda
 - Trade confirmation and ratings
 - Identity verification badge
 - Skill credits wallet
+- Saved searches and alerts
+- Group trades
 
 ### Optional
 - Gamification: levels and badges
-- Saved searches and alerts
-- Group trades
 - Dispute reporting
 
 ## Screens

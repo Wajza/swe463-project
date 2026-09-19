@@ -11,7 +11,7 @@ Course: SWE 463, Group 1
 | Wajd Alghamdi | 202262140 | UI and UX lead |
 | Yasmieen Alshehri | 202271660 | Trade flow developer |
 | Fatimah Alshehab | 202278660 | Backend and data lead |
-| Raghad Almoghrabi | 202156390 | Profile and quality lead |
+| Raghad Almaghrabi | 202156390 | Profile and quality lead |
 
 Every member contributes to both code and documentation. Roles may shift as the project progresses.
 

@@ -33,10 +33,10 @@ The primary users are young adults and university students in Saudi Arabia who h
 - Identity verification badge
 - Skill credits wallet
 - Saved searches and alerts
-- Group trades
+- Gamification: levels and badges
 
 ### Optional
-- Gamification: levels and badges
+- Group trades
 - Dispute reporting
 
 ## Screens

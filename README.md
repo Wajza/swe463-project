@@ -13,7 +13,7 @@ Course: SWE 463, Group 1
 | Fatimah Alshehab | 202278660 | Backend and data lead |
 | Raghad Almaghrabi | 202156390 | Profile and quality lead |
 
-Every member contributes to both code and documentation. Roles may shift as the project progresses.
+Every member contributes to both code and documentation. Roles might shift as the project progresses.
 
 ## Problem
 

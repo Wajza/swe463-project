@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../main.dart';
 import '../listings/listing_screens.dart';
-import '../safety/safety_screens.dart';
+import '../safety/safety_screens.dart'; 
 import '../../models/skill_listing.dart';
 import '../../widgets/souq_widgets.dart';
 

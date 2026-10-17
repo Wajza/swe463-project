@@ -51,7 +51,7 @@ class SouqLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final size = small ? 64.0 : 136.0;
+    final size = small ? 64.0: 136.0;
     return Container(
       width: size,
       height: size,
@@ -87,7 +87,7 @@ class PlaceholderPage extends StatelessWidget {
   final IconData icon;
   final List<Widget> actions;
 
-  @override
+  @override 
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: Text(title)),
@@ -144,7 +144,7 @@ class SkillListingCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
-        child: Row(
+        child: Row(   
           children: [
             Container(
               width: 136,

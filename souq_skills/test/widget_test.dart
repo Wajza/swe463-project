@@ -1,30 +1,43 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:souq_skills/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('welcome screen opens phone verification flow', (tester) async {
+    await tester.pumpWidget(const SouqSkillsApp());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    expect(find.text('Trade what you know.'), findsOneWidget);
+    await tester.ensureVisible(find.text('Get started'));
+    await tester.tap(find.text('Get started'));
+    await tester.pumpAndSettle();
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    expect(find.text('What’s your number?'), findsOneWidget);
+    expect(find.text('Send verification code'), findsOneWidget);
+  });
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  testWidgets('verification success exposes main navigation destinations', (
+    tester,
+  ) async {
+    await tester.pumpWidget(const SouqSkillsApp());
+    await tester.ensureVisible(find.text('Get started'));
+    await tester.tap(find.text('Get started'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Send verification code'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Verify code'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Start exploring'));
+    await tester.tap(find.text('Start exploring'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Home'), findsOneWidget);
+    expect(find.text('Chats'), findsOneWidget);
+    expect(find.text('Post'), findsOneWidget);
+    expect(find.text('Wallet'), findsOneWidget);
+    expect(find.text('Profile'), findsOneWidget);
+
+    await tester.tap(find.text('Wallet'));
+    await tester.pumpAndSettle();
+    expect(find.text('Skill wallet'), findsOneWidget);
   });
 }

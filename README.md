@@ -1,74 +1,130 @@
 # Souq Skills
 
-A Flutter mobile app for a skill barter marketplace in Saudi Arabia. Users trade skills directly with one another. No money changes hands.
+Souq Skills is a Flutter starter application for a skill-exchange marketplace in Saudi Arabia. Members can offer what they know and discover useful skills from their community without cash payments.
 
 ## Team
 
-Course: SWE 463, Group 1
+| Name | Student ID | Initial responsibility |
+|---|---:|---|
+| Wajd Alghamdi | 202262140 | UI and UX |
+| Yasmeen Alshehri | 202271660 | Trade flow |
+| Fatimah Alshehab | 202278660 | Backend and data |
+| Raghad Almaghrabi | 202156390 | Profile and quality |
 
-| Name | Student ID | Initial role |
+All team members contribute to the implementation and documentation. Responsibilities may change as the project progresses.
+
+## Project purpose and Phase 2 scope
+
+This repository contains the SWE436 Phase 2 prototype. It demonstrates the proposed project structure, Figma-informed visual direction, screen organization, and basic built-in Flutter navigation.
+
+Implemented in this phase:
+
+- Figma-informed welcome, phone number, verification, and verification success screens
+- Home and Discover screen with search, categories, alerts, saved searches, filters, and listing cards
+- Listing detail and propose-a-trade navigation
+- Post a Skill: Skills, Details, Listing Preview, and Published screens
+- Chat and Negotiate, Counteroffer Dialog, and Complete Trade and Review placeholders
+- Skill Wallet, Profile, Safety Centre, and Report Received screens
+- Five-item bottom navigation for Home, Chats, Post, Wallet, and Profile
+- Reusable widgets, planned domain models, and planned service interfaces
+
+This remains a simple starter app. It has no backend, database, real authentication, messaging, publishing, payments, notifications, or complete trade logic. Those features belong to Phase 3.
+
+## Prerequisites
+
+- Flutter SDK with Dart 3.13 or newer
+- Android Studio and an Android emulator, or Xcode and an iOS simulator on macOS
+- Chrome for the web version
+
+Check the local setup with:
+
+```bash
+flutter doctor
+```
+
+## Run the application
+
+From the repository root:
+
+```bash
+cd souq_skills
+flutter pub get
+flutter run
+```
+
+Choose a target explicitly:
+
+```bash
+flutter devices
+flutter run -d chrome
+flutter run -d <android-device-id>
+```
+
+The **Get started** button demonstrates the phone verification flow. The fields and code are placeholders; any entered values can continue through the demo. The **Start exploring** button opens the main application shell.
+
+## Folder structure
+
+```text
+souq_skills/
+├── android/                         # Android platform runner
+├── ios/                             # iOS platform runner
+├── web/                             # Web platform runner
+├── assets/                          # Reserved for supplied images and icons
+├── lib/
+│   ├── main.dart                    # App theme, app entry point, main shell
+│   ├── screens/
+│   │   ├── auth/                    # Welcome and verification screens
+│   │   ├── home/                    # Discover, saved searches, and alerts
+│   │   ├── listings/
+│   │   │   └── post_skill/          # Post-a-skill flow
+│   │   ├── trades/                  # Chat, counteroffer, and review screens
+│   │   ├── wallet/                  # Skill wallet
+│   │   ├── profile/                 # Profile
+│   │   └── safety/                  # Safety and report screens
+│   ├── models/                      # Planned User, SkillListing, Trade, Message models
+│   ├── services/                    # Planned auth, listing, trade, and notification services
+│   └── widgets/                     # Reusable buttons, cards, logo, and navigation
+├── test/                            # Widget smoke tests
+├── pubspec.yaml                     # Flutter project configuration
+└── README.md
+```
+
+## Dependencies and package purposes
+
+The project currently uses the following packages:
+
+| Package | Type | Purpose |
 |---|---|---|
-| Wajd Alghamdi | 202262140 | UI and UX lead |
-| Yasmeen Alshehri | 202271660 | Trade flow developer |
-| Fatimah Alshehab | 202278660 | Backend and data lead |
-| Raghad Almaghrabi | 202156390 | Profile and quality lead |
+| `flutter` | SDK dependency | Provides Flutter's Material Design widgets, application framework, and built-in `Navigator` used by the starter app. |
+| `flutter_test` | Development dependency | Provides widget testing APIs used by the smoke tests in `test/`. |
+| `flutter_lints` | Development dependency | Provides the recommended Dart and Flutter static-analysis rules used by `analysis_options.yaml`. |
 
-Every member contributes to both code and documentation. Roles might shift as the project progresses.
+No third-party runtime package has been added for Phase 2. The original project proposal lists `go_router`, `provider`, Firebase packages, geolocation packages, and Firebase Messaging as possible future packages; they are intentionally not installed because this starter uses Flutter's built-in navigation and does not implement backend functionality.
 
-## Problem
+## Verification checklist
 
-Many people in Saudi Arabia have valuable skills, such as tutoring, design, cooking, or basic repair work, but limited disposable income to pay for services they need in return. Existing gig and freelance platforms are built entirely around cash payment, which excludes people who have time and skill to offer but cannot or do not want to pay. Souq Skills lets people trade skills directly, with a credits system to balance trades that are not an even swap.
-
-## Target users
-
-The primary users are young adults and university students in Saudi Arabia who have a marketable skill and want something specific in return without spending money. This includes students who can tutor but need help with design work, home cooks who want another service, and freelancers building a portfolio who are willing to trade their time and skills online. A secondary group is small local service providers, such as home businesses, who want to reach new users through noncash skill exchanges. 
-
-## Features
-
-### Essential
-- Skill listing creation
-- Browse and search by category, distance, and keyword
-- In app trade chat with counter offers
-- Trade confirmation and ratings
-- Identity verification badge
-- Skill credits wallet
-- Saved searches and alerts
-- Gamification: levels and badges
-
-### Optional
-- Group trades
-- Dispute reporting
-
-## Screens
-
-| Screen | Purpose |
-|---|---|
-| Onboarding | Sign-in with phone number verification; the first screen for signed-out users |
-| Home and Discover | Nearby skill listings with search and category filters |
-| Listing detail | One member's offer, what they want in return, their rating, and a propose a trade action |
-| Post a skill | Form to create a new listing: offer, want, category, location |
-| Chat and negotiate | In app messaging for a trade, including counter offers |
-| Profile | Trade history, rating, verification badge, gamification progress (optional) |
-| Skill wallet | Skill credit balance and recent transactions |
-
-## Tech stack and planned packages
-
-- Flutter and Dart
-- [go_router](https://pub.dev/packages/go_router) (BSD 3 Clause) for navigation
-- [provider](https://pub.dev/packages/provider) (MIT) for state management
-- [firebase_core](https://pub.dev/packages/firebase_core), [firebase_auth](https://pub.dev/packages/firebase_auth), [cloud_firestore](https://pub.dev/packages/cloud_firestore) (BSD 3 Clause) for authentication and the database
-- [geolocator](https://pub.dev/packages/geolocator) (MIT) and [geocoding](https://pub.dev/packages/geocoding) (MIT) for distance based listing sorting
-- [firebase_messaging](https://pub.dev/packages/firebase_messaging) (BSD 3 Clause), optional, for alerts if time allows
-
-Every third-party package planned for this project is listed above with its source and license. This list will be kept up to date as the project grows.
+- [ ] Run `flutter doctor`.
+- [ ] Run `flutter pub get`.
+- [ ] Run `flutter analyze`.
+- [ ] Run `flutter test`.
+- [ ] Run `flutter run -d chrome` or launch on an emulator.
+- [ ] Check the welcome, phone, verification, success, discover, listing, post, wallet, profile, safety, and trade flows.
+- [ ] Confirm that secondary screens support back navigation.
 
 
-## Originality and AI use disclosure
+## GitHub submission
 
-Souq Skills is an original idea developed by this team. It is not a copy of an existing application, tutorial project, or another team's work, and no ready-made project has been used or submitted as our own.
+After reviewing the changes, the group can commit and push them using its normal workflow:
 
-No application code has been written yet at this phase. This README and the Phase 1 proposal document were written with the assistance of AI, based on ideas and decisions made by the team. Any future use of AI during development, such as for learning, debugging, or small suggestions, will be disclosed here as it happens.
+```bash
+git status
+git add souq_skills README.md
+git commit -m "Refine Souq Skills Phase 2 starter app"
+git push origin <your-branch-name>
+```
 
-## Project status
+No commit or GitHub link is claimed by this README.
 
-Phase 1: Proposal and team plan. No code yet.
+## AI assistance disclosure
+
+AI assistance was used to help scaffold the Flutter screens, reusable Material widgets, navigation wiring, README wording, and widget smoke tests, and to translate the supplied visual references into code. The team remains responsible for reviewing, testing, adapting, and submitting the code, design, and documentation. No Phase 3 backend or production functionality is represented as complete.

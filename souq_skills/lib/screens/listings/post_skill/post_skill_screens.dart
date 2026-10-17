@@ -7,7 +7,7 @@ class PostSkillSkillsScreen extends StatelessWidget {
   const PostSkillSkillsScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) {  
     return Scaffold(
       appBar: AppBar(title: const Text('Post a skill')),
       body: ListView(

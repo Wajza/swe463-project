@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../../main.dart';
 import '../listings/listing_screens.dart';
 import '../safety/safety_screens.dart'; 
-import '../../models/skill_listing.dart';
+import '../../data/demo_listings.dart';
 import '../../widgets/souq_widgets.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -131,38 +131,20 @@ class HomeScreen extends StatelessWidget {
               const Chip(label: Text('Nearest first')),
             ],
           ),
-          SkillListingCard(
-            listing: const SkillListing(
-              title: 'Brand design basics',
-              owner: 'Lama A.',
-              category: 'Creative & Design',
-              offers: 'Design',
-              wants: 'Excel',
-              distance: '1.8',
-              rating: 4.9,
+          for (final listing in demoListings)
+            SkillListingCard(
+              listing: listing,
+              accentColor: listing.category == 'Languages'
+                  ? const Color(0xFFC9E8FA)
+                  : const Color(0xFFD8EEE0),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ListingDetailScreen(listing: listing),
+                  ),
+                );
+              },
             ),
-            accentColor: const Color(0xFFD8EEE0),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const ListingDetailScreen()),
-            ),
-          ),
-          SkillListingCard(
-            listing: const SkillListing(
-              title: 'Conversational Arabic',
-              owner: 'Noura S.',
-              category: 'Languages',
-              offers: 'Arabic',
-              wants: 'Photography',
-              distance: '4.1',
-              rating: 4.8,
-            ),
-            accentColor: const Color(0xFFC9E8FA),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const ListingDetailScreen()),
-            ),
-          ),
           OutlinedButton.icon(
             onPressed: () => Navigator.push(
               context,

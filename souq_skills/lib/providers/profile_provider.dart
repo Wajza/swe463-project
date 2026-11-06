@@ -3,6 +3,37 @@ import 'package:flutter/foundation.dart';
 import '../models/user_profile.dart';
 
 class ProfileProvider extends ChangeNotifier {
+
+  bool _tradeMessagesEnabled = true;
+  bool _tradeUpdatesEnabled = true;
+  bool _matchingListingsEnabled = false;
+
+  bool get tradeMessagesEnabled => _tradeMessagesEnabled;
+  bool get tradeUpdatesEnabled => _tradeUpdatesEnabled;
+  bool get matchingListingsEnabled => _matchingListingsEnabled;
+
+  void updateNotificationPreferences({
+    bool? tradeMessages,
+    bool? tradeUpdates,
+    bool? matchingListings,
+  }) {
+    final nextMessages = tradeMessages ?? _tradeMessagesEnabled;
+    final nextUpdates = tradeUpdates ?? _tradeUpdatesEnabled;
+    final nextMatches = matchingListings ?? _matchingListingsEnabled;
+
+    if (nextMessages == _tradeMessagesEnabled &&
+        nextUpdates == _tradeUpdatesEnabled &&
+        nextMatches == _matchingListingsEnabled) {
+      return;
+    }
+
+    _tradeMessagesEnabled = nextMessages;
+    _tradeUpdatesEnabled = nextUpdates;
+    _matchingListingsEnabled = nextMatches;
+    notifyListeners();
+  }
+
+
   // Temporary sample profile; persistence will be connected separately.
   UserProfile _profile = const UserProfile(
     id: 'demo-raghad',

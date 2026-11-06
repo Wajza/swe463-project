@@ -1,3 +1,5 @@
+import '../../../providers/listing_provider.dart';
+import 'published_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -276,6 +278,33 @@ class _PostSkillSkillsScreenState extends State<PostSkillSkillsScreen> {
     );
   }
 
+  void _publish() {
+    try {
+      final listing = context.read<ListingProvider>().publish(
+        owner: context.read<ProfileProvider>().profile,
+        offered: _offered.text,
+        wanted: _wanted.text,
+        category: _category ?? '',
+        description: _description.text,
+        location: _location.text,
+        availability: _availability.text,
+        onlineOnly: _onlineOnly,
+        womenOnly: _womenOnly,
+      );
+
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute<void>(
+          builder: (_) => PublishedScreen(listing: listing),
+        ),
+        (_) => false,
+      );
+    } on ArgumentError catch (error) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message.toString())),
+      );
+    }
+  }
+
   Widget _preview() {
     final profile = context.watch<ProfileProvider>().profile;
 
@@ -393,10 +422,10 @@ class _PostSkillSkillsScreenState extends State<PostSkillSkillsScreen> {
               child: const Text('Edit'),
             ),
             const SizedBox(width: 12),
-            const Expanded(
+            Expanded(
               child: FilledButton(
-                onPressed: null,
-                child: Text('Publish'),
+                onPressed: _publish,
+                child: const Text('Publish'),
               ),
             ),
           ],

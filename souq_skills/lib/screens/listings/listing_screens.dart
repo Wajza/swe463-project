@@ -174,9 +174,13 @@ class ListingDetailScreen extends StatelessWidget {
                       _ListingInfo(
                         icon: Icons.location_on_outlined,
                         label: 'LOCATION',
-                        value: listing.location.isEmpty
-                            ? 'Not specified'
-                            : '${listing.location} · ${listing.distance} km',
+                        value: listing.onlineOnly
+                            ? 'Online only'
+                            : listing.location.isEmpty
+                                ? 'Not specified'
+                                : listing.distance.isEmpty
+                                    ? listing.location
+                                    : '${listing.location} · ${listing.distance} km',
                       ),
                       _ListingInfo(
                         icon: Icons.calendar_today_outlined,

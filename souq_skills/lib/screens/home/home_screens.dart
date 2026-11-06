@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import '../../main.dart';
 import '../listings/listing_screens.dart';
 import '../safety/safety_screens.dart'; 
-import '../../data/demo_listings.dart';
+import 'package:provider/provider.dart';
+import '../../providers/listing_provider.dart';
 import '../../widgets/souq_widgets.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -125,13 +126,13 @@ class HomeScreen extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'Skills in Riyadh',
+                'Discover skills',
                 style: Theme.of(context).textTheme.headlineSmall,
               ),
               const Chip(label: Text('Nearest first')),
             ],
           ),
-          for (final listing in demoListings)
+          for (final listing in context.watch<ListingProvider>().listings)
             SkillListingCard(
               listing: listing,
               accentColor: listing.category == 'Languages'

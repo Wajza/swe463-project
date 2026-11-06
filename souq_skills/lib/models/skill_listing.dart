@@ -8,6 +8,9 @@ class SkillListing {
     required this.distance,
     required this.rating,
     this.id = '',
+    this.ownerId = '',
+    this.onlineOnly = false,
+    this.womenOnly = false,
     this.description = '',
     this.location = '',
     this.availability = '',
@@ -25,6 +28,9 @@ class SkillListing {
   final String distance;
   final double rating;
   final String id;
+  final String ownerId;
+  final bool onlineOnly;
+  final bool womenOnly;
   final String description;
   final String location;
   final String availability;

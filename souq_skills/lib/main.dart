@@ -1,5 +1,4 @@
-import 'package:provider/provider.dart';
-import 'providers/profile_provider.dart';
+import 'app_providers.dart';
 import 'package:flutter/material.dart';
 
 import 'screens/auth/auth_screens.dart';
@@ -18,10 +17,7 @@ const souqGold = Color(0xFFE5A83B);
 
 void main() {
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => ProfileProvider(),
-      child: const SouqSkillsApp(),
-    ),
+    const SouqSkillsProviders(child: SouqSkillsApp()),
   );
 }
 

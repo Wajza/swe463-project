@@ -164,13 +164,19 @@ class SkillListingCard extends StatelessWidget {
                         horizontal: 10,
                         vertical: 5,
                       ),
-                      child: Text('${listing.distance}  km'),
+                      child: Text(
+                        listing.onlineOnly
+                            ? 'Online'
+                            : listing.distance.isEmpty
+                                ? 'In person'
+                                : '${listing.distance} km',
+                      ),
                     ),
                   ),
                   const Spacer(),
                   Center(
                     child: Text(
-                      listing.offers.substring(0, 1),
+                      listing.offers.isEmpty ? '?' : listing.offers.substring(0, 1),
                       style: const TextStyle(
                         color: souqNavy,
                         fontSize: 42,
@@ -193,7 +199,7 @@ class SkillListingCard extends StatelessWidget {
                           radius: 17,
                           backgroundColor: souqGreen,
                           child: Text(
-                            listing.owner.substring(0, 2).toUpperCase(),
+                            listing.ownerInitials,
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 11,

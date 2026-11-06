@@ -1,3 +1,4 @@
+import 'my_trades_screen.dart';
 import 'badges_screen.dart';
 import 'package:provider/provider.dart';
 import '../../providers/profile_provider.dart';
@@ -191,12 +192,17 @@ class ProfileScreen extends StatelessWidget {
                         trailing: Icon(Icons.chevron_right),
                       ),
                       const Divider(height: 1),
-                      const ListTile(
-                        enabled: false,
-                        leading: Icon(Icons.list_alt_outlined),
-                        title: Text('My Trades'),
-                        subtitle: Text('Connection pending'),
-                        trailing: Icon(Icons.chevron_right),
+                      ListTile(
+                        leading: const Icon(Icons.list_alt_outlined),
+                        title: const Text('My Trades'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const MyTradesScreen(),
+                            ),
+                          );
+                        },
                       ),
                       const Divider(height: 1),
                       ListTile(

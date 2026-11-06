@@ -11,6 +11,22 @@ class ListingProvider extends ChangeNotifier {
 
   List<SkillListing> get listings => List.unmodifiable(_listings);
 
+  void deleteListing({
+    required String id,
+    required String ownerId,
+  }) {
+    final index = _listings.indexWhere(
+      (listing) => listing.id == id && listing.ownerId == ownerId,
+    );
+
+    if (index == -1) {
+      throw ArgumentError('This listing is no longer available to manage.');
+    }
+
+    _listings.removeAt(index);
+    notifyListeners();
+  }
+
   List<SkillListing> ownedBy(String userId) {
     return List.unmodifiable(
       _listings.where((listing) => listing.ownerId == userId),

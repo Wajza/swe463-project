@@ -1,3 +1,6 @@
+import 'package:provider/provider.dart';
+import '../../providers/profile_provider.dart';
+import 'edit_profile_screen.dart';
 import 'package:flutter/material.dart';
 
 import '../../main.dart';
@@ -12,11 +15,17 @@ class ProfileScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text('Profile'),
         centerTitle: true,
-        actions: const [
+        actions: [
           IconButton(
-            tooltip: 'Account settings will be connected next',
-            onPressed: null,
-            icon: Icon(Icons.settings_outlined),
+            tooltip: 'Edit profile',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const EditProfileScreen(),
+                ),
+              );
+            },
+            icon: const Icon(Icons.settings_outlined),
           ),
         ],
       ),
@@ -195,84 +204,69 @@ class _ProfileHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final profile = context.watch<ProfileProvider>().profile;
+
     return Column(
       children: [
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: souqMint, width: 2),
-              ),
-              child: const CircleAvatar(
-                radius: 42,
-                backgroundColor: souqGreen,
-                child: Text(
-                  'RA',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 25,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
+        CircleAvatar(
+          radius: 46,
+          backgroundColor: souqGreen,
+          child: Text(
+            profile.initials,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 25,
+              fontWeight: FontWeight.bold,
             ),
-            Positioned(
-              right: 0,
-              bottom: 0,
-              child: Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: souqNavy,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: souqCream, width: 2),
-                ),
-                child: const Text(
-                  '12',
-                  style: TextStyle(color: Colors.white, fontSize: 11),
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
         const SizedBox(height: 14),
         Text(
-          'Raghad Almaghrabi',
+          profile.shownName,
           textAlign: TextAlign.center,
           style: Theme.of(context).textTheme.headlineSmall,
         ),
         const SizedBox(height: 4),
-        const Text('@raghad', style: TextStyle(color: souqGreen)),
-        const SizedBox(height: 8),
-        const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.verified, size: 17, color: souqGreen),
-            SizedBox(width: 5),
-            Text('Phone verified', style: TextStyle(color: souqGreen)),
-          ],
+        Text(
+          '@${profile.username}',
+          style: const TextStyle(color: souqGreen),
         ),
-        const SizedBox(height: 8),
-        const Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.location_on_outlined, size: 17),
-            SizedBox(width: 4),
-            Text('Riyadh'),
-          ],
-        ),
-        const SizedBox(height: 12),
-        const Text(
-          'Excel specialist helping local founders get organized. '
-          'Learning pottery one trade at a time.',
-          textAlign: TextAlign.center,
-        ),
+        if (profile.phoneVerified) ...[
+          const SizedBox(height: 8),
+          const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.verified, size: 17, color: souqGreen),
+              SizedBox(width: 5),
+              Text('Phone verified', style: TextStyle(color: souqGreen)),
+            ],
+          ),
+        ],
+        if (!profile.hideLocation) ...[
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.location_on_outlined, size: 17),
+              const SizedBox(width: 4),
+              Flexible(child: Text(profile.city)),
+            ],
+          ),
+        ],
+        if (profile.bio.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          Text(profile.bio, textAlign: TextAlign.center),
+        ],
         const SizedBox(height: 14),
-        const OutlinedButton(
-          onPressed: null,
-          child: Text('Edit profile'),
+        OutlinedButton(
+          onPressed: () {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const EditProfileScreen(),
+              ),
+            );
+          },
+          child: const Text('Edit profile'),
         ),
       ],
     );

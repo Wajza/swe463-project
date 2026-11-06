@@ -1,3 +1,4 @@
+import '../listings/post_skill/post_skill_screens.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -174,10 +175,18 @@ class MyTradesScreen extends StatelessWidget {
                           const SizedBox(height: 8),
                           Row(
                             children: [
-                              const Expanded(
+                              Expanded(
                                 child: OutlinedButton(
-                                  onPressed: null,
-                                  child: Text('Edit'),
+                                  onPressed: () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute<void>(
+                                        builder: (_) => PostSkillSkillsScreen(
+                                          existingListing: listing,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                  child: const Text('Edit'),
                                 ),
                               ),
                               const SizedBox(width: 12),

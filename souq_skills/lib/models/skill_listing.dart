@@ -39,6 +39,39 @@ class SkillListing {
   final int reviewCount;
   final int completedTrades;
 
+  SkillListing copyWith({
+    String? title,
+    String? category,
+    String? offers,
+    String? wants,
+    String? description,
+    String? location,
+    String? availability,
+    bool? onlineOnly,
+    bool? womenOnly,
+  }) {
+    return SkillListing(
+      id: id,
+      ownerId: ownerId,
+      title: title ?? this.title,
+      owner: owner,
+      category: category ?? this.category,
+      offers: offers ?? this.offers,
+      wants: wants ?? this.wants,
+      distance: distance,
+      rating: rating,
+      description: description ?? this.description,
+      location: location ?? this.location,
+      availability: availability ?? this.availability,
+      idealTrade: idealTrade,
+      onlineOnly: onlineOnly ?? this.onlineOnly,
+      womenOnly: womenOnly ?? this.womenOnly,
+      isVerified: isVerified,
+      reviewCount: reviewCount,
+      completedTrades: completedTrades,
+    );
+  }
+
   String get ownerInitials {
     final parts = owner.trim().split(RegExp(r'\s+'));
     if (parts.isEmpty || parts.first.isEmpty) return '?';

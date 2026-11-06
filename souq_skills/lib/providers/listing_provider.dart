@@ -11,6 +11,31 @@ class ListingProvider extends ChangeNotifier {
 
   List<SkillListing> get listings => List.unmodifiable(_listings);
 
+  void updateListing({
+    required SkillListing listing,
+    required String ownerId,
+  }) {
+    final index = _listings.indexWhere(
+      (item) => item.id == listing.id && item.ownerId == ownerId,
+    );
+
+    if (index == -1 || listing.ownerId != ownerId) {
+      throw ArgumentError('This listing is no longer available to manage.');
+    }
+
+    if (listing.offers.trim().isEmpty ||
+        listing.wants.trim().isEmpty ||
+        listing.category.trim().isEmpty ||
+        listing.description.trim().isEmpty ||
+        listing.availability.trim().isEmpty ||
+        (!listing.onlineOnly && listing.location.trim().isEmpty)) {
+      throw ArgumentError('Please complete the required listing details.');
+    }
+
+    _listings[index] = listing;
+    notifyListeners();
+  }
+
   void deleteListing({
     required String id,
     required String ownerId,

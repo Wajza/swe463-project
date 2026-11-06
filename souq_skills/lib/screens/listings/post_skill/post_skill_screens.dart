@@ -1,3 +1,4 @@
+import '../../../models/skill_listing.dart';
 import '../../../providers/listing_provider.dart';
 import 'published_screen.dart';
 import 'package:flutter/material.dart';
@@ -7,7 +8,12 @@ import '../../../main.dart';
 import '../../../providers/profile_provider.dart';
 
 class PostSkillSkillsScreen extends StatefulWidget {
-  const PostSkillSkillsScreen({super.key});
+  const PostSkillSkillsScreen({
+    super.key,
+    this.existingListing,
+  });
+
+  final SkillListing? existingListing;
 
   @override
   State<PostSkillSkillsScreen> createState() => _PostSkillSkillsScreenState();
@@ -42,7 +48,20 @@ class _PostSkillSkillsScreenState extends State<PostSkillSkillsScreen> {
   @override
   void initState() {
     super.initState();
-    _location.text = context.read<ProfileProvider>().profile.city;
+    final listing = widget.existingListing;
+
+    if (listing == null) {
+      _location.text = context.read<ProfileProvider>().profile.city;
+    } else {
+      _offered.text = listing.offers;
+      _wanted.text = listing.wants;
+      _category = listing.category;
+      _description.text = listing.description;
+      _location.text = listing.location;
+      _availability.text = listing.availability;
+      _onlineOnly = listing.onlineOnly;
+      _womenOnly = listing.womenOnly;
+    }
   }
 
   @override
@@ -280,8 +299,37 @@ class _PostSkillSkillsScreenState extends State<PostSkillSkillsScreen> {
 
   void _publish() {
     try {
-      final listing = context.read<ListingProvider>().publish(
-        owner: context.read<ProfileProvider>().profile,
+      final provider = context.read<ListingProvider>();
+      final owner = context.read<ProfileProvider>().profile;
+      final existing = widget.existingListing;
+
+      if (existing != null) {
+        final updated = existing.copyWith(
+          title: _offered.text.trim(),
+          offers: _offered.text.trim(),
+          wants: _wanted.text.trim(),
+          category: _category ?? '',
+          description: _description.text.trim(),
+          location: _onlineOnly ? '' : _location.text.trim(),
+          availability: _availability.text.trim(),
+          onlineOnly: _onlineOnly,
+          womenOnly: _womenOnly,
+        );
+
+        provider.updateListing(
+          listing: updated,
+          ownerId: owner.id,
+        );
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Listing updated')),
+        );
+        Navigator.of(context).pop();
+        return;
+      }
+
+      final listing = provider.publish(
+        owner: owner,
         offered: _offered.text,
         wanted: _wanted.text,
         category: _category ?? '',
@@ -425,7 +473,9 @@ class _PostSkillSkillsScreenState extends State<PostSkillSkillsScreen> {
             Expanded(
               child: FilledButton(
                 onPressed: _publish,
-                child: const Text('Publish'),
+                child: Text(
+                  widget.existingListing == null ? 'Publish' : 'Save changes',
+                ),
               ),
             ),
           ],

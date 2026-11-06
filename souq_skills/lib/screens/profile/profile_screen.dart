@@ -63,17 +63,34 @@ class ProfileScreen extends StatelessWidget {
                   child: const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 8,
-                        crossAxisAlignment: WrapCrossAlignment.center,
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(Icons.auto_awesome, color: souqGreen),
-                          Text(
-                            'Neighborhood Mentor',
-                            style: TextStyle(fontWeight: FontWeight.bold),
+                          Icon(
+                            Icons.auto_awesome,
+                            color: souqGreen,
+                            size: 20,
                           ),
-                          Text('760 / 1,000 XP'),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Neighborhood Mentor',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
+                          ),
+                          SizedBox(width: 8),
+                          Text(
+                            '760 / 1,000 XP',
+                            textAlign: TextAlign.right,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: souqLavender,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                         ],
                       ),
                       SizedBox(height: 14),
@@ -215,17 +232,52 @@ class _ProfileHeader extends StatelessWidget {
 
     return Column(
       children: [
-        CircleAvatar(
-          radius: 46,
-          backgroundColor: souqGreen,
-          child: Text(
-            profile.initials,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 25,
-              fontWeight: FontWeight.bold,
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: souqMint, width: 2),
+              ),
+              child: CircleAvatar(
+                radius: 42,
+                backgroundColor: souqGreen,
+                child: Text(
+                  profile.initials,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 25,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
             ),
-          ),
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: Semantics(
+                label: 'Level 12',
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: souqNavy,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: souqCream, width: 2),
+                  ),
+                  child: const Text(
+                    '12',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 14),
         Text(

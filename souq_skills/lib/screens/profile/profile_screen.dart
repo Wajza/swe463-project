@@ -9,54 +9,379 @@ class ProfileScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Profile')),
-      body: ListView(
-        padding: const EdgeInsets.all(24),
-        children: [
-          const CircleAvatar(radius: 42, child: Icon(Icons.person, size: 42)),
-          const SizedBox(height: 12),
-          const Text(
-            'Your profile',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: souqNavy,
-            ),
+      appBar: AppBar(
+        title: const Text('Profile'),
+        centerTitle: true,
+        actions: const [
+          IconButton(
+            tooltip: 'Account settings will be connected next',
+            onPressed: null,
+            icon: Icon(Icons.settings_outlined),
           ),
-          const SizedBox(height: 4),
-          const Text(
-            'Verified member',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: souqGreen),
-          ),
-          const SizedBox(height: 28),
-          Card(
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 600),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                ListTile(
-                  leading: const Icon(Icons.history),
-                  title: const Text('Trade history'),
-                  onTap: () {},
+                const _ProfileHeader(),
+                const SizedBox(height: 24),
+                const Divider(),
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Row(
+                    children: [
+                      _ProfileStat(value: '4.9', label: 'Rating'),
+                      _ProfileStat(value: '18', label: 'Completed'),
+                      _ProfileStat(value: '2', label: 'Active'),
+                      _ProfileStat(value: '27', label: 'Reviews'),
+                    ],
+                  ),
                 ),
-                ListTile(
-                  leading: const Icon(Icons.star_outline),
-                  title: const Text('Your reviews'),
-                  onTap: () {},
+                const Divider(),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(18),
+                  decoration: BoxDecoration(
+                    color: souqMint,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 8,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Icon(Icons.auto_awesome, color: souqGreen),
+                          Text(
+                            'Neighborhood Mentor',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          Text('760 / 1,000 XP'),
+                        ],
+                      ),
+                      SizedBox(height: 14),
+                      LinearProgressIndicator(
+                        value: 0.76,
+                        minHeight: 8,
+                        color: souqLavender,
+                        backgroundColor: Color(0xFFE5DEF5),
+                      ),
+                      SizedBox(height: 12),
+                      Text('240 XP to Community Guide'),
+                    ],
+                  ),
                 ),
-                ListTile(
-                  leading: const Icon(Icons.shield_outlined),
-                  title: const Text('Safety Centre'),
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const SafetyCentreScreen(),
+                const SizedBox(height: 24),
+                Text(
+                  'Skills',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 14),
+                const _SkillGroup(
+                  title: 'I CAN SHARE',
+                  skills: ['Excel dashboards', 'CV writing'],
+                  color: Color(0xFFD0EADD),
+                ),
+                const SizedBox(height: 16),
+                const _SkillGroup(
+                  title: 'I WANT TO LEARN',
+                  skills: ['Brand design', 'Pottery'],
+                  color: Color(0xFFBFEAF9),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Badges',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
                     ),
+                    const TextButton(
+                      onPressed: null,
+                      child: Text('View all'),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                const Wrap(
+                  spacing: 24,
+                  runSpacing: 16,
+                  alignment: WrapAlignment.spaceAround,
+                  children: [
+                    _BadgePreview(
+                      label: 'Trusted',
+                      icon: Icons.verified_user_outlined,
+                      color: Color(0xFFE5F4CF),
+                    ),
+                    _BadgePreview(
+                      label: 'Connector',
+                      icon: Icons.people_outline,
+                      color: Color(0xFFE5DEF5),
+                    ),
+                    _BadgePreview(
+                      label: '5-star',
+                      icon: Icons.auto_awesome,
+                      color: Color(0xFFFFE5D8),
+                    ),
+                    _BadgePreview(
+                      label: 'Guide',
+                      icon: Icons.star_outline,
+                      color: Color(0xFFF0F5E8),
+                      locked: true,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 28),
+                Text(
+                  'Your activity',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const SizedBox(height: 12),
+                Card(
+                  margin: EdgeInsets.zero,
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
+                    children: [
+                      const ListTile(
+                        enabled: false,
+                        leading: Icon(Icons.history),
+                        title: Text('Trade history'),
+                        subtitle: Text('Connection pending'),
+                        trailing: Icon(Icons.chevron_right),
+                      ),
+                      const Divider(height: 1),
+                      const ListTile(
+                        enabled: false,
+                        leading: Icon(Icons.list_alt_outlined),
+                        title: Text('My Trades'),
+                        subtitle: Text('Connection pending'),
+                        trailing: Icon(Icons.chevron_right),
+                      ),
+                      const Divider(height: 1),
+                      ListTile(
+                        leading: const Icon(Icons.shield_outlined),
+                        title: const Text('Safety Centre'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const SafetyCentreScreen(),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ProfileHeader extends StatelessWidget {
+  const _ProfileHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: souqMint, width: 2),
+              ),
+              child: const CircleAvatar(
+                radius: 42,
+                backgroundColor: souqGreen,
+                child: Text(
+                  'RA',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 25,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              right: 0,
+              bottom: 0,
+              child: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: souqNavy,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: souqCream, width: 2),
+                ),
+                child: const Text(
+                  '12',
+                  style: TextStyle(color: Colors.white, fontSize: 11),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        Text(
+          'Raghad Almaghrabi',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.headlineSmall,
+        ),
+        const SizedBox(height: 4),
+        const Text('@raghad', style: TextStyle(color: souqGreen)),
+        const SizedBox(height: 8),
+        const Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.verified, size: 17, color: souqGreen),
+            SizedBox(width: 5),
+            Text('Phone verified', style: TextStyle(color: souqGreen)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.location_on_outlined, size: 17),
+            SizedBox(width: 4),
+            Text('Riyadh'),
+          ],
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Excel specialist helping local founders get organized. '
+          'Learning pottery one trade at a time.',
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 14),
+        const OutlinedButton(
+          onPressed: null,
+          child: Text('Edit profile'),
+        ),
+      ],
+    );
+  }
+}
+
+class _ProfileStat extends StatelessWidget {
+  const _ProfileStat({required this.value, required this.label});
+
+  final String value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: souqNavy,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SkillGroup extends StatelessWidget {
+  const _SkillGroup({
+    required this.title,
+    required this.skills,
+    required this.color,
+  });
+
+  final String title;
+  final List<String> skills;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final skill in skills)
+              Chip(
+                label: Text(skill),
+                backgroundColor: color,
+                side: BorderSide.none,
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _BadgePreview extends StatelessWidget {
+  const _BadgePreview({
+    required this.label,
+    required this.icon,
+    required this.color,
+    this.locked = false,
+  });
+
+  final String label;
+  final IconData icon;
+  final Color color;
+  final bool locked;
+
+  @override
+  Widget build(BuildContext context) {
+    return Opacity(
+      opacity: locked ? 0.45 : 1,
+      child: Column(
+        children: [
+          Container(
+            width: 54,
+            height: 54,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: Icon(icon, color: souqGreen),
+          ),
+          const SizedBox(height: 8),
+          Text(label, style: const TextStyle(fontSize: 11)),
         ],
       ),
     );

@@ -1,3 +1,4 @@
+import 'badges_screen.dart';
 import 'package:provider/provider.dart';
 import '../../providers/profile_provider.dart';
 import 'edit_profile_screen.dart';
@@ -113,9 +114,15 @@ class ProfileScreen extends StatelessWidget {
                         style: Theme.of(context).textTheme.titleLarge,
                       ),
                     ),
-                    const TextButton(
-                      onPressed: null,
-                      child: Text('View all'),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => const BadgesScreen(),
+                          ),
+                        );
+                      },
+                      child: const Text('View all'),
                     ),
                   ],
                 ),

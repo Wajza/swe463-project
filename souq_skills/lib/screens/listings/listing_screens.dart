@@ -1,3 +1,4 @@
+import 'listing_reviews_screen.dart';
 import 'package:flutter/material.dart';
 
 import '../../main.dart';
@@ -192,6 +193,8 @@ class ListingDetailScreen extends StatelessWidget {
                             : listing.idealTrade,
                       ),
                       const SizedBox(height: 20),
+                      ListingReviewsSection(listing: listing),
+                      const SizedBox(height: 24),
                       Card(
                         margin: EdgeInsets.zero,
                         child: ListTile(

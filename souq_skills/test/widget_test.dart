@@ -1,10 +1,17 @@
+import 'package:souq_skills/providers/profile_provider.dart';
+import 'package:provider/provider.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:souq_skills/main.dart';
 
 void main() {
   testWidgets('welcome screen opens phone verification flow', (tester) async {
-    await tester.pumpWidget(const SouqSkillsApp());
+    await tester.pumpWidget(
+      ChangeNotifierProvider(
+        create: (_) => ProfileProvider(),
+        child: const SouqSkillsApp(),
+      ),
+    );
 
     expect(find.text('Trade what you know.'), findsOneWidget);
     await tester.ensureVisible(find.text('Get started'));
@@ -18,7 +25,12 @@ void main() {
   testWidgets('verification success exposes main navigation destinations', (
     tester,
   ) async {
-    await tester.pumpWidget(const SouqSkillsApp());
+    await tester.pumpWidget(
+      ChangeNotifierProvider(
+        create: (_) => ProfileProvider(),
+        child: const SouqSkillsApp(),
+      ),
+    );
     await tester.ensureVisible(find.text('Get started'));
     await tester.tap(find.text('Get started'));
     await tester.pumpAndSettle();

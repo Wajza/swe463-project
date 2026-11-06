@@ -2,8 +2,15 @@ import 'package:flutter/material.dart';
 
 import '../../main.dart';
 
-class WalletScreen extends StatelessWidget {
+class WalletScreen extends StatefulWidget {
   const WalletScreen({super.key});
+
+  @override
+  State<WalletScreen> createState() => _WalletScreenState();
+}
+
+class _WalletScreenState extends State<WalletScreen> {
+  bool _hideBalance = false;
 
   @override
   Widget build(BuildContext context) {
@@ -14,25 +21,46 @@ class WalletScreen extends StatelessWidget {
         children: [
           Card(
             color: souqNavy,
-            child: const Padding(
-              padding: EdgeInsets.all(24),
+            child: Padding(
+              padding: const EdgeInsets.all(24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    'Available credits',
-                    style: TextStyle(color: Colors.white70),
+                  Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Available credits',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip:
+                            _hideBalance ? 'Show balance' : 'Hide balance',
+                        onPressed: () {
+                          setState(() {
+                            _hideBalance = !_hideBalance;
+                          });
+                        },
+                        icon: Icon(
+                          _hideBalance
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
                   ),
-                  SizedBox(height: 8),
+                  const SizedBox(height: 8),
                   Text(
-                    '120',
-                    style: TextStyle(
+                    _hideBalance ? '••••' : '120',
+                    style: const TextStyle(
                       color: Colors.white,
                       fontSize: 42,
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  Text(
+                  const Text(
                     'Skill credits',
                     style: TextStyle(color: Colors.white70),
                   ),

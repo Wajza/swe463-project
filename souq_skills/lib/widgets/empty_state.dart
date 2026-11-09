@@ -1,0 +1,3 @@
+import 'package:flutter/material.dart';
+import 'package:souq_skills/core/app_colors.dart';
+class EmptyState extends StatelessWidget { const EmptyState({required this.title, required this.message, this.icon = Icons.inbox_outlined, this.action, super.key}); final String title; final String message; final IconData icon; final Widget? action; @override Widget build(BuildContext context) => Center(child: Column(mainAxisSize: MainAxisSize.min, children: [Icon(icon, size: 56, color: souqGreen), Text(title, style: const TextStyle(fontWeight: FontWeight.bold)), Text(message, textAlign: TextAlign.center), ?action])); }

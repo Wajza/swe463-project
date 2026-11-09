@@ -1,0 +1,2 @@
+import 'package:flutter/material.dart';
+class InfoTile extends StatelessWidget { const InfoTile({required this.label, required this.value, this.icon, this.trailing, super.key}); final String label; final String value; final IconData? icon; final Widget? trailing; @override Widget build(BuildContext context) => ListTile(contentPadding: EdgeInsets.zero, leading: icon == null ? null : Icon(icon), title: Text(label, style: const TextStyle(fontSize: 12, color: Colors.black54)), subtitle: Text(value), trailing: trailing); }

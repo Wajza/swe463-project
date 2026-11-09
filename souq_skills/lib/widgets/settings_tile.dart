@@ -1,0 +1,2 @@
+import 'package:flutter/material.dart';
+class SettingsTile extends StatelessWidget { const SettingsTile({required this.title, required this.icon, this.subtitle, this.trailing, this.onTap, super.key}); final String title; final IconData icon; final String? subtitle; final Widget? trailing; final VoidCallback? onTap; @override Widget build(BuildContext context) => ListTile(leading: Icon(icon), title: Text(title), subtitle: subtitle == null ? null : Text(subtitle!), trailing: trailing ?? const Icon(Icons.chevron_right), onTap: onTap); }

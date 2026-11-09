@@ -46,21 +46,11 @@ class NotificationService {
     _repo.emitChange();
   }
 
-  void setAllEnabled(bool enabled) => _repo.updateSettings(
-    _repo.settings.copyWith(
-      messageNotifications: enabled,
-      tradeNotifications: enabled,
-      groupNotifications: enabled,
-      searchAlerts: enabled,
-    ),
-  );
-
   bool _isEnabled(NotificationType type) => switch (type) {
     NotificationType.message => _repo.settings.messageNotifications,
     NotificationType.trade => _repo.settings.tradeNotifications,
     NotificationType.review => _repo.settings.tradeNotifications,
     NotificationType.groupTrade => _repo.settings.groupNotifications,
-    NotificationType.searchAlert => _repo.settings.searchAlerts,
     NotificationType.system => true,
   };
 }

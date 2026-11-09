@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:souq_skills/core/category_config.dart';
 
+import 'option_sheet.dart';
 import 'section_header.dart';
 
-class SkillChipEditor extends StatefulWidget {
+class SkillChipEditor extends StatelessWidget {
   const SkillChipEditor({
     required this.title,
     required this.skills,
@@ -16,54 +18,34 @@ class SkillChipEditor extends StatefulWidget {
   final ValueChanged<String> onAdd;
   final ValueChanged<String> onRemove;
 
-  @override
-  State<SkillChipEditor> createState() => _SkillChipEditorState();
-}
-
-class _SkillChipEditorState extends State<SkillChipEditor> {
-  final _controller = TextEditingController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _add() {
-    final skill = _controller.text.trim();
-    if (skill.isEmpty) return;
-    widget.onAdd(skill);
-    _controller.clear();
+  Future<void> _add(BuildContext context) async {
+    final skill = await OptionSheet.show<String>(
+      context,
+      title: 'Add a skill',
+      options: CategoryConfig.allSkills
+          .where((item) => !skills.contains(item))
+          .toList(),
+    );
+    if (skill != null) onAdd(skill);
   }
 
   @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      SectionHeader(title: widget.title),
+      SectionHeader(title: title),
       Wrap(
         spacing: 8,
         runSpacing: 4,
         children: [
-          for (final skill in widget.skills)
-            InputChip(
-              label: Text(skill),
-              onDeleted: () => widget.onRemove(skill),
-            ),
-        ],
-      ),
-      const SizedBox(height: 8),
-      TextField(
-        controller: _controller,
-        onSubmitted: (_) => _add(),
-        decoration: InputDecoration(
-          labelText: 'Add a skill',
-          suffixIcon: IconButton(
-            tooltip: 'Add',
-            onPressed: _add,
-            icon: const Icon(Icons.add),
+          for (final skill in skills)
+            InputChip(label: Text(skill), onDeleted: () => onRemove(skill)),
+          ActionChip(
+            avatar: const Icon(Icons.add, size: 18),
+            label: const Text('Add'),
+            onPressed: () => _add(context),
           ),
-        ),
+        ],
       ),
     ],
   );

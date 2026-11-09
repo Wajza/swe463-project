@@ -1,12 +1,11 @@
 import 'package:souq_skills/core/app_routes.dart';
 import 'package:souq_skills/core/badge_config.dart';
+import 'package:souq_skills/models/app_settings.dart';
 import 'package:souq_skills/models/dispute_case.dart';
 import 'package:souq_skills/models/group_trade.dart';
 import 'package:souq_skills/models/message.dart';
 import 'package:souq_skills/models/notification.dart';
 import 'package:souq_skills/models/review.dart';
-import 'package:souq_skills/models/saved_search.dart';
-import 'package:souq_skills/models/search_alert.dart';
 import 'package:souq_skills/models/skill_listing.dart';
 import 'package:souq_skills/models/trade.dart';
 import 'package:souq_skills/models/trade_proposal.dart';
@@ -23,7 +22,7 @@ const _faisal = 'm-faisal';
 
 /// The sample data behind this front-end-only build.
 class SeedData {
-  const SeedData._({
+  const SeedData({
     required this.currentUser,
     required this.members,
     required this.listings,
@@ -35,10 +34,10 @@ class SeedData {
     this.proposals = const [],
     this.trades = const [],
     this.sessions = const [],
-    this.savedSearches = const [],
-    this.searchAlerts = const [],
     this.disputes = const [],
     this.awardedBadgeIds = const {},
+    this.blockedMemberIds = const {},
+    this.settings = const AppSettings(),
   });
 
   final User currentUser;
@@ -52,10 +51,10 @@ class SeedData {
   final List<AppNotification> notifications;
   final List<WalletTransaction> transactions;
   final List<Review> reviews;
-  final List<SavedSearch> savedSearches;
-  final List<SearchAlert> searchAlerts;
   final List<DisputeCase> disputes;
   final Set<String> awardedBadgeIds;
+  final Set<String> blockedMemberIds;
+  final AppSettings settings;
 
   static const welcomeCredits = 120;
 
@@ -63,7 +62,7 @@ class SeedData {
   factory SeedData.newMember(User user) {
     final demo = SeedData.demo();
     final now = DateTime.now();
-    return SeedData._(
+    return SeedData(
       currentUser: user,
       members: demo.members,
       listings: demo.listings
@@ -97,7 +96,7 @@ class SeedData {
           title: 'Welcome to Souq Skills',
           message: 'Post your first skill to start trading.',
           createdAt: now,
-          route: AppRoutes.skillCategory,
+          route: AppRoutes.createListing,
         ),
       ],
     );
@@ -108,10 +107,11 @@ class SeedData {
     DateTime hoursAgo(int hours) => now.subtract(Duration(hours: hours));
     DateTime daysAgo(int days) => now.subtract(Duration(days: days));
 
-    return SeedData._(
+    return SeedData(
       currentUser: const User(
         id: _me,
-        name: 'Yara Alghamdi',
+        firstName: 'Yara',
+        lastName: 'Alghamdi',
         username: 'yara',
         city: 'Riyadh',
         phone: '501234567',
@@ -124,7 +124,8 @@ class SeedData {
       members: const [
         User(
           id: _sami,
-          name: 'Sami Alharbi',
+          firstName: 'Sami',
+          lastName: 'Alharbi',
           username: 'sami',
           city: 'Riyadh',
           isVerified: true,
@@ -135,7 +136,8 @@ class SeedData {
         ),
         User(
           id: _lina,
-          name: 'Lina Alqahtani',
+          firstName: 'Lina',
+          lastName: 'Alqahtani',
           username: 'lina',
           city: 'Jeddah',
           isVerified: true,
@@ -146,7 +148,8 @@ class SeedData {
         ),
         User(
           id: _omar,
-          name: 'Omar Aziz',
+          firstName: 'Omar',
+          lastName: 'Aziz',
           username: 'omar',
           city: 'Dammam',
           isVerified: true,
@@ -157,7 +160,8 @@ class SeedData {
         ),
         User(
           id: _noura,
-          name: 'Noura Alotaibi',
+          firstName: 'Noura',
+          lastName: 'Alotaibi',
           username: 'noura',
           city: 'Riyadh',
           isVerified: true,
@@ -168,7 +172,8 @@ class SeedData {
         ),
         User(
           id: _faisal,
-          name: 'Faisal Alshehri',
+          firstName: 'Faisal',
+          lastName: 'Alshehri',
           username: 'faisal',
           city: 'Makkah',
           bio: 'Oud player who repairs instruments.',
@@ -448,14 +453,6 @@ class SeedData {
           description: 'Weekly conversation swaps between English and Arabic.',
           sessionsMinutes: 45,
         ),
-        GroupTrade(
-          id: 'g-music',
-          title: 'Oud beginners group',
-          ownerId: _faisal,
-          memberIds: [_faisal],
-          skills: ['Oud lessons'],
-          description: 'A small group learning the oud from the first note.',
-        ),
       ],
       messages: [
         Message(
@@ -504,13 +501,6 @@ class SeedData {
           senderName: 'Sami Alharbi',
           createdAt: hoursAgo(20),
         ),
-        Message(
-          id: 'msg-7',
-          conversationId: 'support',
-          text: 'Hello! How can we help you today?',
-          senderName: 'Souq Support',
-          createdAt: daysAgo(4),
-        ),
       ],
       notifications: [
         AppNotification(
@@ -537,17 +527,8 @@ class SeedData {
           message: 'Omar invited you to the Riyadh food swap.',
           type: NotificationType.groupTrade,
           createdAt: daysAgo(3),
-          route: AppRoutes.groupTradeInvitation,
+          route: AppRoutes.groupTradeDetails,
           routeArgument: 'g-food',
-        ),
-        AppNotification(
-          id: 'n-alert',
-          title: 'New match for your alert',
-          message: 'A new skill matches your photography alert.',
-          type: NotificationType.searchAlert,
-          createdAt: daysAgo(4),
-          isRead: true,
-          route: AppRoutes.searchAlerts,
         ),
       ],
       transactions: [
@@ -662,23 +643,12 @@ class SeedData {
           date: daysAgo(18),
         ),
       ],
-      savedSearches: const [
-        SavedSearch(id: 'ss-photo', query: 'photography'),
-        SavedSearch(id: 'ss-online', category: 'Technology', onlineOnly: true),
-      ],
-      searchAlerts: const [
-        SearchAlert(
-          id: 'sa-photo',
-          criteria: SavedSearch(id: 'sa-photo', query: 'photography'),
-        ),
-      ],
       disputes: [
         DisputeCase(
           id: 'c-seed',
           caseNumber: 'SQ-1000',
           kind: CaseKind.tradeReport,
           reason: 'Member did not attend',
-          details: 'The member missed our agreed session.',
           tradeId: 't-declined',
           status: DisputeStatus.underReview,
           createdAt: daysAgo(5),

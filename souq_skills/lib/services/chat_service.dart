@@ -9,7 +9,6 @@ import 'notification_service.dart';
 import 'repository.dart';
 
 class ChatService {
-  static const supportConversationId = 'support';
   static const _groupPrefix = 'group:';
 
   final Repository _repo = Repository.instance;
@@ -71,7 +70,6 @@ class ChatService {
       isRead: false,
       proposalId: proposalId,
     );
-    if (conversationId == supportConversationId) return;
     NotificationService().push(
       title: 'New message from $senderName',
       message: text,
@@ -117,7 +115,6 @@ class ChatService {
   );
 
   Conversation? _summarize(String id, List<Message> messages) {
-    if (id == supportConversationId) return null;
     final last = messages.last;
     final unread = messages.where((message) => !message.isRead).length;
     if (id.startsWith(_groupPrefix)) {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:souq_skills/core/app_options.dart';
 import 'package:souq_skills/models/message.dart';
 import 'package:souq_skills/services/chat_service.dart';
 import 'package:souq_skills/services/proposal_service.dart';
@@ -6,6 +7,7 @@ import 'package:souq_skills/widgets/chat_composer.dart';
 import 'package:souq_skills/widgets/live_view.dart';
 import 'package:souq_skills/widgets/message_bubble.dart';
 import 'package:souq_skills/widgets/proposal_card.dart';
+import 'package:souq_skills/widgets/quick_replies.dart';
 
 /// The message list and composer behind every chat in the app.
 class ConversationView extends StatelessWidget {
@@ -54,6 +56,7 @@ class ConversationView extends StatelessWidget {
           },
         ),
       ),
+      QuickReplies(replies: AppOptions.quickReplies, onTap: onSend),
       ChatComposer(onSend: onSend),
     ],
   );

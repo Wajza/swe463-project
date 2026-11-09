@@ -22,6 +22,7 @@ class Trade implements Identifiable {
     required this.offeredSkill,
     required this.requestedSkill,
     this.sessionsMinutes = 60,
+    this.creditsPaid = 0,
     this.status = TradeStatus.pending,
     this.sessionId,
   });
@@ -33,6 +34,9 @@ class Trade implements Identifiable {
   final String offeredSkill;
   final String requestedSkill;
   final int sessionsMinutes;
+
+  /// Credits the current user pays in place of a skill.
+  final int creditsPaid;
   final TradeStatus status;
   final String? sessionId;
 
@@ -41,13 +45,16 @@ class Trade implements Identifiable {
       status == TradeStatus.pending ||
       status == TradeStatus.accepted ||
       status == TradeStatus.disputed;
-  String get title => '$offeredSkill ⇄ $requestedSkill';
+  String get givenLabel =>
+      creditsPaid > 0 ? '$creditsPaid credits' : offeredSkill;
+  String get title => '$givenLabel ⇄ $requestedSkill';
 
   Trade copyWith({
     String? proposalId,
     String? offeredSkill,
     String? requestedSkill,
     int? sessionsMinutes,
+    int? creditsPaid,
     TradeStatus? status,
     String? sessionId,
   }) => Trade(
@@ -57,7 +64,32 @@ class Trade implements Identifiable {
     offeredSkill: offeredSkill ?? this.offeredSkill,
     requestedSkill: requestedSkill ?? this.requestedSkill,
     sessionsMinutes: sessionsMinutes ?? this.sessionsMinutes,
+    creditsPaid: creditsPaid ?? this.creditsPaid,
     status: status ?? this.status,
     sessionId: sessionId ?? this.sessionId,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'proposalId': proposalId,
+    'otherMemberId': otherMemberId,
+    'offeredSkill': offeredSkill,
+    'requestedSkill': requestedSkill,
+    'sessionsMinutes': sessionsMinutes,
+    'creditsPaid': creditsPaid,
+    'status': status.name,
+    'sessionId': sessionId,
+  };
+
+  factory Trade.fromJson(Map<String, dynamic> json) => Trade(
+    id: json['id'] as String,
+    proposalId: json['proposalId'] as String,
+    otherMemberId: json['otherMemberId'] as String,
+    offeredSkill: json['offeredSkill'] as String,
+    requestedSkill: json['requestedSkill'] as String,
+    sessionsMinutes: json['sessionsMinutes'] as int,
+    creditsPaid: json['creditsPaid'] as int,
+    status: TradeStatus.values.byName(json['status'] as String),
+    sessionId: json['sessionId'] as String?,
   );
 }

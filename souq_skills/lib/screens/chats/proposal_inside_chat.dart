@@ -17,21 +17,6 @@ class ProposalInsideChat extends StatelessWidget {
 
   final ProposalRequest request;
 
-  TradeProposal _buildDraft() {
-    final listingId = request.listingId;
-    final listing = listingId == null ? null : ListingService().byId(listingId);
-    final mySkills = ProfileService().currentUser.skillsOffered;
-    final theirSkills =
-        MemberService().byId(request.memberId)?.skillsOffered ?? const [];
-    return TradeProposal(
-      senderId: User.currentUserId,
-      receiverId: request.memberId,
-      offeredSkill: listing?.wants ?? (mySkills.firstOrNull ?? ''),
-      requestedSkill: listing?.offers ?? (theirSkills.firstOrNull ?? ''),
-      sessionsMinutes: listing?.sessionsMinutes ?? 60,
-    );
-  }
-
   void _send(BuildContext context, TradeProposal proposal) {
     ProposalService().send(proposal);
     // A proposal started from a listing continues in that member's chat.
@@ -44,16 +29,31 @@ class ProposalInsideChat extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) => AppPage(
-    title: 'Propose a trade',
-    children: [
-      Text('Send a proposal to ${MemberService().nameOf(request.memberId)}.'),
-      const SizedBox(height: 16),
-      ProposalForm(
-        initial: _buildDraft(),
-        submitLabel: 'Send proposal',
-        onSubmit: (proposal) => _send(context, proposal),
-      ),
-    ],
-  );
+  Widget build(BuildContext context) {
+    final listingId = request.listingId;
+    final listing = listingId == null ? null : ListingService().byId(listingId);
+    final mySkills = ProfileService().currentUser.skillsOffered;
+    final theirSkills =
+        MemberService().byId(request.memberId)?.skillsOffered ?? const [];
+    return AppPage(
+      title: 'Propose a trade',
+      children: [
+        Text('Send a proposal to ${MemberService().nameOf(request.memberId)}.'),
+        const SizedBox(height: 16),
+        ProposalForm(
+          initial: TradeProposal(
+            senderId: User.currentUserId,
+            receiverId: request.memberId,
+            offeredSkill: mySkills.firstOrNull ?? '',
+            requestedSkill: listing?.offers ?? (theirSkills.firstOrNull ?? ''),
+            sessionsMinutes: listing?.sessionsMinutes ?? 60,
+          ),
+          mySkills: mySkills,
+          theirSkills: theirSkills,
+          submitLabel: 'Send proposal',
+          onSubmit: (proposal) => _send(context, proposal),
+        ),
+      ],
+    );
+  }
 }

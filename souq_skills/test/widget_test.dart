@@ -6,36 +6,43 @@ import 'package:souq_skills/screens/shell/main_shell.dart';
 import 'package:souq_skills/screens/wallet/wallet_screen.dart';
 import 'package:souq_skills/services/repository.dart';
 
+import 'support/memory_data_source.dart';
+
 void main() {
-  setUp(Repository.instance.reset);
-
-  testWidgets('welcome screen opens account flow', (tester) async {
-    await tester.pumpWidget(const SouqSkillsApp());
-
-    expect(find.text('Souq Skills'), findsOneWidget);
-    await tester.tap(find.text('Create account'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Create account'), findsOneWidget);
-    expect(find.text('Phone number'), findsOneWidget);
+  setUp(() {
+    Repository.instance
+      ..dataSource = MemoryDataSource()
+      ..reset();
   });
 
-  testWidgets('phone verification requires six digits', (tester) async {
+  Future<void> openPhoneScreen(WidgetTester tester) async {
     await tester.pumpWidget(const SouqSkillsApp());
-    await tester.tap(find.text('Create account'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Get started'));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('welcome screen has one way forward', (tester) async {
+    await tester.pumpWidget(const SouqSkillsApp());
+    await tester.pumpAndSettle();
+
+    expect(find.text('Souq Skills'), findsOneWidget);
+    expect(find.byType(FilledButton), findsOneWidget);
+  });
+
+  testWidgets('phone number and code are validated', (tester) async {
+    await openPhoneScreen(tester);
+    await tester.enterText(find.byType(TextField), '123');
+    await tester.tap(find.text('Continue'));
+    await tester.pumpAndSettle();
+    expect(find.text('Enter a valid Saudi mobile number'), findsOneWidget);
+
     await tester.enterText(find.byType(TextField), '501234567');
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
-
-    expect(
-      find.text('Enter the 6-digit code sent to your phone.'),
-      findsOneWidget,
-    );
     await tester.enterText(find.byType(TextField), '12345');
     await tester.tap(find.text('Verify'));
     await tester.pumpAndSettle();
-
     expect(find.text('Enter a valid 6-digit code'), findsOneWidget);
   });
 

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:souq_skills/core/app_options.dart';
 import 'package:souq_skills/core/app_routes.dart';
+import 'package:souq_skills/core/feedback.dart';
 import 'package:souq_skills/core/navigation.dart';
 import 'package:souq_skills/services/safety_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
@@ -19,13 +20,13 @@ class ReportTradeScreen extends StatelessWidget {
         intro: 'Tell us about the problem with this trade.',
         reasons: AppOptions.tradeIssueReasons,
         submitLabel: 'Submit report',
-        onSubmit: (reason, details) {
+        onSubmit: (reason) {
           final report = SafetyService().reportTrade(
             tradeId: tradeId,
             reason: reason,
-            details: details,
           );
-          context.replaceWith(AppRoutes.reportReceived, args: report.id);
+          context.replaceWith(AppRoutes.disputeCaseDetails, args: report.id);
+          context.showMessage('Report received');
         },
       ),
     ],

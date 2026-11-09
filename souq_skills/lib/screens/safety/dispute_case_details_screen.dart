@@ -8,7 +8,6 @@ import 'package:souq_skills/services/safety_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
 import 'package:souq_skills/widgets/info_card.dart';
 import 'package:souq_skills/widgets/info_tile.dart';
-import 'package:souq_skills/widgets/souq_button.dart';
 import 'package:souq_skills/widgets/status_chip.dart';
 
 class DisputeCaseDetailsScreen extends StatelessWidget {
@@ -23,12 +22,6 @@ class DisputeCaseDetailsScreen extends StatelessWidget {
       final tradeId = item.tradeId;
       return AppPage(
         title: 'Case ${item.caseNumber}',
-        footer: [
-          SouqButton(
-            label: 'Message support',
-            onPressed: () => context.open(AppRoutes.supportMessages),
-          ),
-        ],
         children: [
           Align(
             alignment: Alignment.centerLeft,
@@ -39,7 +32,6 @@ class DisputeCaseDetailsScreen extends StatelessWidget {
             tiles: [
               InfoTile(label: 'Type', value: item.kind.label),
               InfoTile(label: 'Reason', value: item.reason),
-              InfoTile(label: 'Details', value: item.details),
               InfoTile(
                 label: 'Submitted',
                 value: AppFormatters.dateTime(item.createdAt),

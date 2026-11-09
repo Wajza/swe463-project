@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-/// The layout every screen shares: app bar, content and pinned footer buttons.
+/// The layout every screen shares: app bar, content and one main action.
 class AppPage extends StatelessWidget {
   const AppPage({
     required this.title,
@@ -8,7 +8,7 @@ class AppPage extends StatelessWidget {
     this.body,
     this.emptyState,
     this.actions,
-    this.footer = const [],
+    this.action,
     this.floatingActionButton,
     this.showBackButton = true,
     super.key,
@@ -24,7 +24,9 @@ class AppPage extends StatelessWidget {
   /// Shown instead of [children] when there are none.
   final Widget? emptyState;
   final List<Widget>? actions;
-  final List<Widget> footer;
+
+  /// The screen's one main button, pinned to the bottom.
+  final Widget? action;
   final Widget? floatingActionButton;
   final bool showBackButton;
 
@@ -43,16 +45,12 @@ class AppPage extends StatelessWidget {
     ),
     floatingActionButton: floatingActionButton,
     body: _buildContent(),
-    bottomNavigationBar: footer.isEmpty
+    bottomNavigationBar: action == null
         ? null
         : SafeArea(
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                spacing: 10,
-                children: footer,
-              ),
+              child: action,
             ),
           ),
   );

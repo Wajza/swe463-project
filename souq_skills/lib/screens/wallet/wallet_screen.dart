@@ -18,7 +18,10 @@ class WalletScreen extends StatelessWidget {
       return AppPage(
         title: 'Wallet',
         children: [
-          WalletBalanceCard(balance: wallet.balance),
+          WalletBalanceCard(
+            balance: wallet.balance,
+            held: wallet.heldCredits(),
+          ),
           const SectionHeader(title: 'Activity'),
           if (transactions.isEmpty)
             const EmptyState(

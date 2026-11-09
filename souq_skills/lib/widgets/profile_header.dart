@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:souq_skills/core/app_theme.dart';
 import 'package:souq_skills/models/user.dart';
+import 'package:souq_skills/services/profile_service.dart';
 
 import 'user_avatar.dart';
 
@@ -8,6 +9,13 @@ class ProfileHeader extends StatelessWidget {
   const ProfileHeader({required this.user, super.key});
 
   final User user;
+
+  String get _cityLabel {
+    final isHidden =
+        user.id == User.currentUserId &&
+        !ProfileService().settings.locationVisible;
+    return isHidden ? '${user.city} (private)' : user.city;
+  }
 
   @override
   Widget build(BuildContext context) => Column(
@@ -32,7 +40,7 @@ class ProfileHeader extends StatelessWidget {
         ],
       ),
       if (user.username.isNotEmpty) Text('@${user.username}'),
-      if (user.city.isNotEmpty) Text(user.city),
+      if (user.city.isNotEmpty) Text(_cityLabel),
       if (user.bio.isNotEmpty) ...[
         const SizedBox(height: 8),
         Text(user.bio, textAlign: TextAlign.center),

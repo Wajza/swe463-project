@@ -3,6 +3,7 @@ import 'package:souq_skills/core/app_router.dart';
 import 'package:souq_skills/core/app_routes.dart';
 import 'package:souq_skills/core/app_theme.dart';
 import 'package:souq_skills/services/repository.dart';
+import 'package:souq_skills/widgets/save_failure_banner.dart';
 
 class SouqSkillsApp extends StatelessWidget {
   const SouqSkillsApp({super.key});
@@ -19,9 +20,10 @@ class SouqSkillsApp extends StatelessWidget {
         themeMode: Repository.instance.settings.darkMode
             ? ThemeMode.dark
             : ThemeMode.light,
+        builder: (context, child) => SaveFailureBanner(child: child!),
         initialRoute: AppRoutes.welcome,
         onGenerateRoute: AppRouter.onGenerateRoute,
-        // Data lives in memory, so a browser refresh restarts from the welcome.
+        // Always start at the gate, which restores the saved data first.
         onGenerateInitialRoutes: (_) => [
           AppRouter.onGenerateRoute(
             const RouteSettings(name: AppRoutes.welcome),

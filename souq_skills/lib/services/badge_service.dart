@@ -81,8 +81,6 @@ class BadgeService {
     ];
   }
 
-  AchievementBadge? byId(String id) => _repo.find(badges(), id);
-
   /// Announces any badge that became earned since the last check.
   void sync() {
     for (final badge in badges()) {
@@ -91,8 +89,7 @@ class BadgeService {
           title: 'Badge earned: ${badge.title}',
           message: badge.description,
           type: NotificationType.review,
-          route: AppRoutes.badgeDetails,
-          routeArgument: badge.id,
+          route: AppRoutes.badges,
         );
       }
     }

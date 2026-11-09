@@ -21,7 +21,7 @@ class HelpCenterScreen extends StatelessWidget {
     (
       'How do I earn badges?',
       'Badges unlock as you complete trades, publish listings, join groups, '
-          'and share ratings. Open any badge to see its requirement.',
+          'and share ratings. The Badges page shows each requirement.',
     ),
     (
       'What if something goes wrong?',
@@ -32,13 +32,11 @@ class HelpCenterScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AppPage(
-    title: 'Help center',
-    footer: [
-      SouqButton(
-        label: 'Contact support',
-        onPressed: () => context.open(AppRoutes.contactSupport),
-      ),
-    ],
+    title: 'Help and support',
+    action: SouqButton(
+      label: 'Send a complaint',
+      onPressed: () => context.open(AppRoutes.complaint),
+    ),
     children: [
       for (final (question, answer) in _questions)
         Card(

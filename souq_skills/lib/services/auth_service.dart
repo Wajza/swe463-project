@@ -1,4 +1,3 @@
-import 'package:souq_skills/core/validators.dart';
 import 'package:souq_skills/models/user.dart';
 
 import 'repository.dart';
@@ -7,28 +6,35 @@ import 'seed_data.dart';
 class AuthService {
   final Repository _repo = Repository.instance;
 
-  bool get hasAccount => _repo.hasAccount;
   bool get isSignedIn => _repo.isSignedIn;
 
-  bool verifyOtp(String code) => AppValidators.otp(code) == null;
+  /// Whether [phone] belongs to the existing account on this device.
+  bool isKnownPhone(String phone) =>
+      _repo.hasAccount && _repo.currentUser.phone == phone;
 
   void createAccount({
-    required String name,
+    required String firstName,
+    required String lastName,
     required String username,
     required String phone,
     required String city,
+    required bool keepLocationPrivate,
   }) {
     _repo.load(
       SeedData.newMember(
         User(
           id: User.currentUserId,
-          name: name,
+          firstName: firstName,
+          lastName: lastName,
           username: username,
           phone: phone,
           city: city,
           isVerified: true,
         ),
       ),
+    );
+    _repo.settings = _repo.settings.copyWith(
+      locationVisible: !keepLocationPrivate,
     );
     _repo.hasAccount = true;
     _setSignedIn(true);

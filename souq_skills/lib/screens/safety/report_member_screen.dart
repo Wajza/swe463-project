@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:souq_skills/core/app_options.dart';
 import 'package:souq_skills/core/app_routes.dart';
+import 'package:souq_skills/core/feedback.dart';
 import 'package:souq_skills/core/navigation.dart';
 import 'package:souq_skills/services/member_service.dart';
 import 'package:souq_skills/services/safety_service.dart';
@@ -21,13 +22,13 @@ class ReportMemberScreen extends StatelessWidget {
             'Tell us about your concern with ${MemberService().nameOf(memberId)}.',
         reasons: AppOptions.memberReportReasons,
         submitLabel: 'Submit report',
-        onSubmit: (reason, details) {
+        onSubmit: (reason) {
           final report = SafetyService().reportMember(
             memberId: memberId,
             reason: reason,
-            details: details,
           );
-          context.replaceWith(AppRoutes.reportReceived, args: report.id);
+          context.replaceWith(AppRoutes.disputeCaseDetails, args: report.id);
+          context.showMessage('Report received');
         },
       ),
     ],

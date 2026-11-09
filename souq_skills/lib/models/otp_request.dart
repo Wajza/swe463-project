@@ -1,6 +1,8 @@
+enum OtpPurpose { signIn, signUp, changePhone }
+
 class OtpRequest {
-  const OtpRequest({required this.phone, required this.isReturningUser});
+  const OtpRequest({required this.phone, required this.purpose});
 
   final String phone;
-  final bool isReturningUser;
+  final OtpPurpose purpose;
 }

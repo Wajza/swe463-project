@@ -21,6 +21,14 @@ class ProposalService {
   String otherMemberId(TradeProposal proposal) =>
       isIncoming(proposal) ? proposal.senderId : proposal.receiverId;
 
+  /// The current user's side of a counteroffer to [proposal].
+  TradeProposal counterDraft(TradeProposal proposal) => isIncoming(proposal)
+      ? proposal.copyWith(
+          offeredSkill: proposal.requestedSkill,
+          requestedSkill: proposal.offeredSkill,
+        )
+      : proposal;
+
   /// Starts a pending trade from a proposal the current user wrote.
   void send(TradeProposal draft) {
     final proposal = draft.copyWith(
@@ -37,6 +45,7 @@ class ProposalService {
         offeredSkill: proposal.offeredSkill,
         requestedSkill: proposal.requestedSkill,
         sessionsMinutes: proposal.sessionsMinutes,
+        creditsPaid: proposal.creditsOffered,
       ),
     );
     _postAndAwaitReply(proposal);
@@ -63,6 +72,7 @@ class ProposalService {
         offeredSkill: proposal.offeredSkill,
         requestedSkill: proposal.requestedSkill,
         sessionsMinutes: proposal.sessionsMinutes,
+        creditsPaid: proposal.creditsOffered,
       ),
     );
     _postAndAwaitReply(proposal);

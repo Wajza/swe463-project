@@ -1,4 +1,4 @@
-import 'package:souq_skills/models/saved_search.dart';
+import 'package:souq_skills/models/search_criteria.dart';
 import 'package:souq_skills/models/skill_listing.dart';
 import 'package:souq_skills/models/user.dart';
 
@@ -9,7 +9,7 @@ class ListingService {
   final Repository _repo = Repository.instance;
 
   /// Active listings from other, unblocked members that match [criteria].
-  List<SkillListing> discover(SavedSearch criteria) {
+  List<SkillListing> discover(SearchCriteria criteria) {
     final query = criteria.query.trim().toLowerCase();
     return _repo.listings.where((item) {
       final text = '${item.title} ${item.offers} ${item.wants}'.toLowerCase();
@@ -36,6 +36,12 @@ class ListingService {
 
   List<SkillListing> saved() =>
       _repo.listings.where((item) => item.isSaved).toList();
+
+  /// The location to show, hiding the current user's city if they chose to.
+  String locationLabel(SkillListing listing) =>
+      isMine(listing) && !_repo.settings.locationVisible
+      ? 'Location private'
+      : listing.city;
 
   bool isMine(SkillListing listing) => listing.ownerId == User.currentUserId;
 

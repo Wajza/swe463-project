@@ -3,60 +3,35 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:souq_skills/core/app_router.dart';
 import 'package:souq_skills/core/app_routes.dart';
 import 'package:souq_skills/core/app_theme.dart';
-import 'package:souq_skills/core/badge_config.dart';
 import 'package:souq_skills/models/otp_request.dart';
 import 'package:souq_skills/models/proposal_request.dart';
-import 'package:souq_skills/models/skill_listing.dart';
 import 'package:souq_skills/screens/utility/not_found_screen.dart';
 import 'package:souq_skills/services/repository.dart';
 
-const _draft = SkillListing(
-  ownerId: 'me',
-  category: 'Music',
-  title: 'Draft',
-  offers: 'Oud',
-  wants: 'Figma',
-  description: 'A draft listing.',
-  availability: 'Weekends',
-);
+import 'support/memory_data_source.dart';
 
 const _routeArguments = <String, Object>{
   AppRoutes.otpVerification: OtpRequest(
     phone: '501234567',
-    isReturningUser: true,
+    purpose: OtpPurpose.signIn,
   ),
   AppRoutes.createAccountProfile: '501234567',
-  AppRoutes.skillDetails: _draft,
-  AppRoutes.listingInformation: _draft,
-  AppRoutes.listingPreview: _draft,
-  AppRoutes.postConfirmation: 'l-flutter',
   AppRoutes.listingDetails: 'l-flutter',
   AppRoutes.editListing: 'l-yara-ui',
   AppRoutes.shareListing: 'l-flutter',
   AppRoutes.memberProfile: 'm-sami',
-  AppRoutes.publicSkillList: 'm-sami',
   AppRoutes.chat: 'm-noura',
   AppRoutes.groupChat: 'g-design',
   AppRoutes.proposalInsideChat: ProposalRequest(memberId: 'm-sami'),
-  AppRoutes.counteroffer: 'p-noura',
   AppRoutes.proposalDetails: 'p-noura',
   AppRoutes.tradeDetails: 't-sami',
-  AppRoutes.tradeStatus: 't-sami',
   AppRoutes.scheduleSession: 't-faisal',
-  AppRoutes.tradeCompletion: 't-sami',
   AppRoutes.disputeTrade: 't-sami',
   AppRoutes.rateTrade: 't-lina',
   AppRoutes.groupTradeDetails: 'g-design',
   AppRoutes.editGroupTrade: 'g-language',
-  AppRoutes.groupTradeInvitation: 'g-food',
-  AppRoutes.groupTradeCompletion: 'g-language',
-  AppRoutes.transactionDetails: 'tx-omar',
-  AppRoutes.badgeDetails: BadgeConfig.firstExchange,
-  AppRoutes.notificationDetails: 'n-rate',
   AppRoutes.reportMember: 'm-sami',
-  AppRoutes.blockMember: 'm-sami',
   AppRoutes.reportTrade: 't-sami',
-  AppRoutes.reportReceived: 'c-seed',
   AppRoutes.disputeCaseDetails: 'c-seed',
 };
 
@@ -71,7 +46,11 @@ Widget _appAt(ThemeData theme, String route) => MaterialApp(
 );
 
 void main() {
-  setUp(Repository.instance.reset);
+  setUp(() {
+    Repository.instance
+      ..dataSource = MemoryDataSource()
+      ..reset();
+  });
 
   for (final (label, theme) in [
     ('light', AppTheme.light()),
@@ -98,6 +77,25 @@ void main() {
       }
     });
   }
+
+  testWidgets('every screen has at most one main button', (tester) async {
+    tester.view
+      ..physicalSize = const Size(390, 3000)
+      ..devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    for (final route in AppRouter.routeNames) {
+      await tester.pumpWidget(_appAt(AppTheme.light(), route));
+      await tester.pump();
+      expect(
+        find.byType(FilledButton).evaluate().length,
+        lessThanOrEqualTo(1),
+        reason: route,
+      );
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    }
+  });
 
   testWidgets('missing arguments show Not Found instead of crashing', (
     tester,

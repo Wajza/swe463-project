@@ -31,14 +31,8 @@ class OnboardingScreen extends StatelessWidget {
               ),
               const SizedBox(height: 36),
               SouqButton(
-                label: 'Create account',
-                onPressed: () => context.open(AppRoutes.createAccount),
-              ),
-              const SizedBox(height: 12),
-              SouqButton(
-                label: 'Sign in',
-                outlined: true,
-                onPressed: () => context.open(AppRoutes.signIn),
+                label: 'Get started',
+                onPressed: () => context.open(AppRoutes.phone),
               ),
             ],
           ),

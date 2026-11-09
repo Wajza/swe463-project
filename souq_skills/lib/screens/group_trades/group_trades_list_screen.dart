@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:souq_skills/core/app_routes.dart';
 import 'package:souq_skills/core/navigation.dart';
 import 'package:souq_skills/models/group_trade.dart';
+import 'package:souq_skills/models/listing_kind.dart';
 import 'package:souq_skills/services/group_trade_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
 import 'package:souq_skills/widgets/choice_chip_row.dart';
@@ -42,7 +43,8 @@ class _GroupTradesListScreenState extends State<GroupTradesListScreen> {
     title: 'Group trades',
     floatingActionButton: FloatingActionButton(
       tooltip: 'Create group trade',
-      onPressed: () => context.open(AppRoutes.createGroupTrade),
+      onPressed: () =>
+          context.open(AppRoutes.createListing, args: ListingKind.group),
       child: const Icon(Icons.add),
     ),
     children: [
@@ -59,7 +61,7 @@ class _GroupTradesListScreenState extends State<GroupTradesListScreen> {
           if (groups.isEmpty) {
             return const EmptyState(
               title: 'No group trades',
-              message: 'Create one with the + button.',
+              message: 'Groups are invite only. Create one with the + button.',
               icon: Icons.groups_outlined,
             );
           }

@@ -1,14 +1,32 @@
 import 'package:flutter/material.dart';
 import 'package:souq_skills/core/app_routes.dart';
 import 'package:souq_skills/core/navigation.dart';
+import 'package:souq_skills/models/app_settings.dart';
+import 'package:souq_skills/services/auth_service.dart';
+import 'package:souq_skills/services/profile_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
+import 'package:souq_skills/widgets/confirmation_dialog.dart';
+import 'package:souq_skills/widgets/live_view.dart';
 import 'package:souq_skills/widgets/settings_group.dart';
+import 'package:souq_skills/widgets/settings_switch_tile.dart';
 import 'package:souq_skills/widgets/settings_tile.dart';
 
 import 'sign_out_dialog.dart';
 
+/// Every preference on one page, changed directly with a switch.
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
+
+  Widget _toggle(
+    String title,
+    bool value,
+    AppSettings Function(AppSettings current, bool value) change,
+  ) => SettingsSwitchTile(
+    title: title,
+    value: value,
+    onChanged: (next) =>
+        ProfileService().updateSettings((current) => change(current, next)),
+  );
 
   Widget _link(
     BuildContext context,
@@ -17,127 +35,125 @@ class SettingsScreen extends StatelessWidget {
     String route,
   ) => SettingsTile(title: title, icon: icon, onTap: () => context.open(route));
 
+  Future<void> _deleteAccount(BuildContext context) async {
+    final confirmed = await ConfirmationDialog.confirm(
+      context,
+      title: 'Delete your account?',
+      message: 'This removes your profile, listings, credits and ratings.',
+      confirmLabel: 'Delete',
+      destructive: true,
+    );
+    if (!confirmed || !context.mounted) return;
+    AuthService().deleteAccount();
+    context.resetTo(AppRoutes.welcome);
+  }
+
   @override
-  Widget build(BuildContext context) => AppPage(
-    title: 'Settings',
-    children: [
-      SettingsGroup(
-        title: 'Account',
+  Widget build(BuildContext context) => LiveView(
+    builder: (context) {
+      final settings = ProfileService().settings;
+      return AppPage(
+        title: 'Settings',
         children: [
-          _link(
-            context,
-            'Account details',
-            Icons.person_outline,
-            AppRoutes.accountDetails,
+          SettingsGroup(
+            title: 'Account',
+            children: [
+              _link(
+                context,
+                'Edit profile',
+                Icons.edit_outlined,
+                AppRoutes.editProfile,
+              ),
+            ],
           ),
-          _link(
-            context,
-            'Edit profile',
-            Icons.edit_outlined,
-            AppRoutes.editProfile,
+          SettingsGroup(
+            title: 'Appearance',
+            children: [
+              _toggle(
+                'Dark mode',
+                settings.darkMode,
+                (s, v) => s.copyWith(darkMode: v),
+              ),
+            ],
+          ),
+          SettingsGroup(
+            title: 'Notifications',
+            children: [
+              _toggle(
+                'Messages',
+                settings.messageNotifications,
+                (s, v) => s.copyWith(messageNotifications: v),
+              ),
+              _toggle(
+                'Trades and ratings',
+                settings.tradeNotifications,
+                (s, v) => s.copyWith(tradeNotifications: v),
+              ),
+              _toggle(
+                'Group trades',
+                settings.groupNotifications,
+                (s, v) => s.copyWith(groupNotifications: v),
+              ),
+            ],
+          ),
+          SettingsGroup(
+            title: 'Privacy',
+            children: [
+              _toggle(
+                'Public profile',
+                settings.profileVisible,
+                (s, v) => s.copyWith(profileVisible: v),
+              ),
+              _link(
+                context,
+                'Blocked members',
+                Icons.block,
+                AppRoutes.blockedMembers,
+              ),
+            ],
+          ),
+          SettingsGroup(
+            title: 'Help',
+            children: [
+              _link(
+                context,
+                'Help and support',
+                Icons.help_outline,
+                AppRoutes.help,
+              ),
+              _link(
+                context,
+                'Safety centre',
+                Icons.shield_outlined,
+                AppRoutes.safety,
+              ),
+              _link(
+                context,
+                'About and policies',
+                Icons.info_outline,
+                AppRoutes.about,
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SettingsGroup(
+            children: [
+              SettingsTile(
+                title: 'Sign out',
+                icon: Icons.logout,
+                destructive: true,
+                onTap: () => SignOutDialog.show(context),
+              ),
+              SettingsTile(
+                title: 'Delete account',
+                icon: Icons.delete_outline,
+                destructive: true,
+                onTap: () => _deleteAccount(context),
+              ),
+            ],
           ),
         ],
-      ),
-      SettingsGroup(
-        title: 'Preferences',
-        children: [
-          _link(
-            context,
-            'App preferences',
-            Icons.tune,
-            AppRoutes.appPreferences,
-          ),
-          _link(
-            context,
-            'Notifications',
-            Icons.notifications_none,
-            AppRoutes.notificationPreferences,
-          ),
-          _link(
-            context,
-            'Privacy',
-            Icons.lock_outline,
-            AppRoutes.privacySettings,
-          ),
-          _link(
-            context,
-            'Location',
-            Icons.location_on_outlined,
-            AppRoutes.locationPermission,
-          ),
-          _link(
-            context,
-            'Blocked members',
-            Icons.block,
-            AppRoutes.blockedMembers,
-          ),
-        ],
-      ),
-      SettingsGroup(
-        title: 'Support',
-        children: [
-          _link(context, 'Help center', Icons.help_outline, AppRoutes.help),
-          _link(
-            context,
-            'Contact support',
-            Icons.support_agent,
-            AppRoutes.contactSupport,
-          ),
-          _link(
-            context,
-            'Support messages',
-            Icons.forum_outlined,
-            AppRoutes.supportMessages,
-          ),
-          _link(
-            context,
-            'Safety centre',
-            Icons.shield_outlined,
-            AppRoutes.safety,
-          ),
-        ],
-      ),
-      SettingsGroup(
-        title: 'About',
-        children: [
-          _link(context, 'Terms', Icons.description_outlined, AppRoutes.terms),
-          _link(
-            context,
-            'Privacy policy',
-            Icons.privacy_tip_outlined,
-            AppRoutes.privacyPolicy,
-          ),
-          _link(
-            context,
-            'Community guidelines',
-            Icons.groups_outlined,
-            AppRoutes.communityGuidelines,
-          ),
-          _link(
-            context,
-            'About Souq Skills',
-            Icons.info_outline,
-            AppRoutes.about,
-          ),
-        ],
-      ),
-      const SizedBox(height: 12),
-      SettingsGroup(
-        children: [
-          SettingsTile(
-            title: 'Sign out',
-            icon: Icons.logout,
-            destructive: true,
-            onTap: () => SignOutDialog.show(context),
-          ),
-          SettingsTile(
-            title: 'Delete account',
-            icon: Icons.delete_outline,
-            destructive: true,
-            onTap: () => context.open(AppRoutes.deleteAccount),
-          ),
-        ],
-      ),
-    ],
+      );
+    },
   );
 }

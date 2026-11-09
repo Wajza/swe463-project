@@ -13,6 +13,8 @@ import 'package:souq_skills/services/trade_service.dart';
 import 'package:souq_skills/services/trade_session_service.dart';
 import 'package:souq_skills/services/wallet_service.dart';
 
+import 'support/memory_data_source.dart';
+
 Future<void> _signIn(WidgetTester tester) async {
   // A tall screen so lazily built list items exist without scrolling.
   tester.view
@@ -20,27 +22,27 @@ Future<void> _signIn(WidgetTester tester) async {
     ..devicePixelRatio = 1;
   addTearDown(tester.view.reset);
   await tester.pumpWidget(const SouqSkillsApp());
-  await tester.tap(find.text('Sign in'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('Get started'));
   await tester.pumpAndSettle();
   await tester.enterText(find.byType(TextField), '501234567');
   await tester.tap(find.text('Continue'));
   await tester.pumpAndSettle();
-  await tester.enterText(find.byType(TextField), '123456');
   await tester.tap(find.text('Verify'));
   await tester.pumpAndSettle();
 }
 
-Future<void> _tapVisible(WidgetTester tester, Finder finder) async {
-  await tester.ensureVisible(finder);
-  await tester.pumpAndSettle();
-  await tester.tap(finder);
-  await tester.pumpAndSettle();
-}
-
 void main() {
-  setUp(Repository.instance.reset);
+  late MemoryDataSource source;
 
-  testWidgets('profile opens settings from an icon, not a list item', (
+  setUp(() {
+    source = MemoryDataSource();
+    Repository.instance
+      ..dataSource = source
+      ..reset();
+  });
+
+  testWidgets('profile shows settings icon, badges and ratings', (
     tester,
   ) async {
     await _signIn(tester);
@@ -54,7 +56,39 @@ void main() {
 
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    expect(find.text('App preferences'), findsOneWidget);
+    expect(find.text('Dark mode'), findsOneWidget);
+  });
+
+  testWidgets('home has no category section', (tester) async {
+    await _signIn(tester);
+    expect(find.text('Categories'), findsNothing);
+    expect(find.text('Skills for you'), findsOneWidget);
+  });
+
+  testWidgets('typing on Home filters the skills straight away', (
+    tester,
+  ) async {
+    await _signIn(tester);
+    expect(find.text('Build your first Flutter app'), findsOneWidget);
+
+    await tester.enterText(find.byType(TextField), 'oud');
+    await tester.pump();
+
+    expect(find.text('Oud lessons from scratch'), findsOneWidget);
+    expect(find.text('Build your first Flutter app'), findsNothing);
+  });
+
+  testWidgets('Home filters apply as soon as they are tapped', (tester) async {
+    await _signIn(tester);
+    await tester.tap(find.byTooltip('Filter'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Cooking'));
+    await tester.pumpAndSettle();
+    await tester.tapAt(const Offset(400, 10));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Traditional Saudi cooking'), findsOneWidget);
+    expect(find.text('Build your first Flutter app'), findsNothing);
   });
 
   testWidgets('a finished exchange can be rated and appears on the profile', (
@@ -65,12 +99,11 @@ void main() {
 
     await tester.tap(find.text('Profile'));
     await tester.pumpAndSettle();
-    await _tapVisible(tester, find.text('My trades'));
+    await tester.tap(find.text('My trades'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('UI design ⇄ Photography'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Mark as complete'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Confirm completion'));
     await tester.pumpAndSettle();
 
     expect(find.text('Rate your experience'), findsOneWidget);
@@ -78,48 +111,66 @@ void main() {
 
     await tester.tap(find.byTooltip('4 stars'));
     await tester.pump();
-    await tester.enterText(find.byType(TextField), 'Lovely photo lesson');
+    await tester.tap(find.text('On time'));
+    await tester.pump();
     await tester.tap(find.text('Submit rating'));
     await tester.pumpAndSettle();
-    expect(find.text('Rating saved'), findsOneWidget);
 
-    await tester.tap(find.text('See it on my profile'));
-    await tester.pumpAndSettle();
     expect(find.text('You rated Sami Alharbi'), findsOneWidget);
-    expect(find.text('Lovely photo lesson'), findsOneWidget);
+    expect(find.text('On time'), findsOneWidget);
 
     await tester.pump(MemberSimulator.replyDelay);
     await tester.pumpAndSettle();
     expect(find.text('Sami Alharbi rated you'), findsOneWidget);
   });
 
-  testWidgets('posting a skill publishes it to My listings', (tester) async {
+  Future<void> openPostTab(WidgetTester tester) async {
     await _signIn(tester);
     await tester.tap(find.text('Post'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Cooking').last);
-    await tester.pumpAndSettle();
+  }
 
-    await tester.enterText(find.byType(TextFormField).at(0), 'Bread baking');
-    await tester.enterText(find.byType(TextFormField).at(1), 'Baking');
-    await tester.enterText(
-      find.byType(TextFormField).at(2),
-      'Learn to bake bread at home.',
-    );
-    await tester.tap(find.text('Next'));
+  testWidgets('a solo listing is published with selections only', (
+    tester,
+  ) async {
+    await openPostTab(tester);
+    await tester.tap(find.text('Cooking'));
     await tester.pumpAndSettle();
-
-    await tester.enterText(find.byType(TextFormField).at(0), 'Guitar');
-    await tester.tap(find.text('Preview'));
+    await tester.tap(find.text('Baking'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Publish'));
     await tester.pumpAndSettle();
-    expect(find.text('Your skill is live'), findsOneWidget);
 
-    await tester.tap(find.text('View listing'));
+    expect(find.text('Learn Baking'), findsOneWidget);
+    expect(find.text('Edit listing'), findsOneWidget);
+  });
+
+  testWidgets('a group trade is published with selections only', (
+    tester,
+  ) async {
+    await openPostTab(tester);
+    await tester.tap(find.text('Group'));
     await tester.pumpAndSettle();
-    expect(find.text('Bread baking'), findsOneWidget);
-    expect(find.text('Manage listing'), findsOneWidget);
+    await tester.tap(find.text('Music'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Piano'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Singing'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Publish'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Music skill circle'), findsOneWidget);
+    expect(find.text('Piano'), findsOneWidget);
+  });
+
+  testWidgets('publishing without selections shows validation', (tester) async {
+    await openPostTab(tester);
+    await tester.tap(find.text('Publish'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Choose a category'), findsOneWidget);
+    expect(find.text('Choose at least one skill'), findsOneWidget);
   });
 
   test('a proposal becomes a schedulable trade when accepted', () {
@@ -145,10 +196,12 @@ void main() {
 
   test('a new account starts without the demo activity', () {
     AuthService().createAccount(
-      name: 'New Member',
+      firstName: 'New',
+      lastName: 'Member',
       username: 'new_member',
       phone: '512345678',
       city: 'Jeddah',
+      keepLocationPrivate: false,
     );
 
     expect(TradeService().all(), isEmpty);

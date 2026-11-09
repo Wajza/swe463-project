@@ -1,41 +1,32 @@
 import 'package:flutter/material.dart';
-import 'package:souq_skills/core/app_routes.dart';
-import 'package:souq_skills/core/navigation.dart';
-import 'package:souq_skills/widgets/app_page.dart';
-import 'package:souq_skills/widgets/settings_group.dart';
-import 'package:souq_skills/widgets/settings_tile.dart';
-import 'package:souq_skills/widgets/souq_logo.dart';
+import 'package:souq_skills/widgets/article_page.dart';
 
 class AboutScreen extends StatelessWidget {
   const AboutScreen({super.key});
 
-  static const _states = <(String, IconData, String)>[
-    ('Loading', Icons.hourglass_empty, AppRoutes.loading),
-    ('Error', Icons.error_outline, AppRoutes.error),
-    ('Offline', Icons.cloud_off_outlined, AppRoutes.offline),
-    ('Not found', Icons.search_off, AppRoutes.notFound),
-  ];
-
   @override
-  Widget build(BuildContext context) => AppPage(
-    title: 'About',
-    children: [
-      const Center(child: SouqLogo(small: true)),
-      const SizedBox(height: 12),
-      const Text(
-        'Souq Skills 1.0.0\nA community marketplace for trading skills.',
-        textAlign: TextAlign.center,
+  Widget build(BuildContext context) => const ArticlePage(
+    title: 'About and policies',
+    sections: [
+      ArticleSection(
+        'Souq Skills 1.0.0',
+        'A community marketplace for trading skills without cash.',
       ),
-      SettingsGroup(
-        title: 'Preview screen states',
-        children: [
-          for (final (title, icon, route) in _states)
-            SettingsTile(
-              title: title,
-              icon: icon,
-              onTap: () => context.open(route),
-            ),
-        ],
+      ArticleSection(
+        'Terms',
+        'Give accurate information and use the app respectfully. Trades are '
+            'agreements between members. Skill credits have no cash value.',
+      ),
+      ArticleSection(
+        'Privacy',
+        'We use your phone number, profile, listings, messages and ratings to '
+            'run your account and keep members safe. Control your visibility '
+            'in Settings.',
+      ),
+      ArticleSection(
+        'Community guidelines',
+        'Be respectful and honest, meet in public places, report anything '
+            'that makes you uneasy, and rate fairly.',
       ),
     ],
   );

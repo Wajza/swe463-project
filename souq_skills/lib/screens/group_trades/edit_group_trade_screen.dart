@@ -3,8 +3,9 @@ import 'package:souq_skills/core/feedback.dart';
 import 'package:souq_skills/core/navigation.dart';
 import 'package:souq_skills/screens/utility/not_found_screen.dart';
 import 'package:souq_skills/services/group_trade_service.dart';
+import 'package:souq_skills/services/posting_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
-import 'package:souq_skills/widgets/group_trade_form.dart';
+import 'package:souq_skills/widgets/skill_post_form.dart';
 
 class EditGroupTradeScreen extends StatelessWidget {
   const EditGroupTradeScreen({required this.groupId, super.key});
@@ -18,11 +19,11 @@ class EditGroupTradeScreen extends StatelessWidget {
     return AppPage(
       title: 'Edit group trade',
       children: [
-        GroupTradeForm(
-          initial: group,
+        SkillPostForm(
+          initial: PostingService().fromGroup(group),
           submitLabel: 'Save changes',
-          onSubmit: (updated) {
-            GroupTradeService().update(updated);
+          onSubmit: (post) {
+            PostingService().updateGroup(group, post);
             context.back();
             context.showMessage('Group trade updated');
           },

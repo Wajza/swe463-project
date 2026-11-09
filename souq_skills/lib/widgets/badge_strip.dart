@@ -21,7 +21,7 @@ class BadgeStrip extends StatelessWidget {
         final badge = badges[index];
         return InkWell(
           borderRadius: BorderRadius.circular(14),
-          onTap: () => context.open(AppRoutes.badgeDetails, args: badge.id),
+          onTap: () => context.open(AppRoutes.badges),
           child: SizedBox(
             width: 88,
             child: Padding(

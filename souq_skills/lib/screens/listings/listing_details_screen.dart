@@ -9,6 +9,7 @@ import 'package:souq_skills/services/review_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
 import 'package:souq_skills/widgets/listing_summary.dart';
 import 'package:souq_skills/widgets/member_tile.dart';
+import 'package:souq_skills/widgets/overflow_menu.dart';
 import 'package:souq_skills/widgets/review_card.dart';
 import 'package:souq_skills/widgets/section_header.dart';
 import 'package:souq_skills/widgets/souq_button.dart';
@@ -27,12 +28,6 @@ class ListingDetailsScreen extends StatelessWidget {
       return AppPage(
         title: 'Listing details',
         actions: [
-          IconButton(
-            tooltip: 'Share',
-            onPressed: () =>
-                context.open(AppRoutes.shareListing, args: listing.id),
-            icon: const Icon(Icons.share_outlined),
-          ),
           if (!isMine)
             IconButton(
               tooltip: listing.isSaved ? 'Remove from saved' : 'Save skill',
@@ -41,34 +36,37 @@ class ListingDetailsScreen extends StatelessWidget {
                 listing.isSaved ? Icons.favorite : Icons.favorite_border,
               ),
             ),
-        ],
-        footer: isMine
-            ? [
-                SouqButton(
-                  label: 'Manage listing',
-                  onPressed: () =>
-                      context.open(AppRoutes.editListing, args: listing.id),
+          OverflowMenu(
+            items: [
+              MenuAction(
+                'Share listing',
+                () => context.open(AppRoutes.shareListing, args: listing.id),
+              ),
+              if (!isMine)
+                MenuAction(
+                  'Message member',
+                  () => context.open(AppRoutes.chat, args: listing.ownerId),
                 ),
-              ]
-            : [
-                SouqButton(
-                  label: 'Propose a trade',
-                  icon: Icons.handshake_outlined,
-                  onPressed: () => context.open(
-                    AppRoutes.proposalInsideChat,
-                    args: ProposalRequest(
-                      memberId: listing.ownerId,
-                      listingId: listing.id,
-                    ),
+            ],
+          ),
+        ],
+        action: isMine
+            ? SouqButton(
+                label: 'Edit listing',
+                onPressed: () =>
+                    context.open(AppRoutes.editListing, args: listing.id),
+              )
+            : SouqButton(
+                label: 'Propose a trade',
+                icon: Icons.handshake_outlined,
+                onPressed: () => context.open(
+                  AppRoutes.proposalInsideChat,
+                  args: ProposalRequest(
+                    memberId: listing.ownerId,
+                    listingId: listing.id,
                   ),
                 ),
-                SouqButton(
-                  label: 'Message member',
-                  outlined: true,
-                  onPressed: () =>
-                      context.open(AppRoutes.chat, args: listing.ownerId),
-                ),
-              ],
+              ),
         children: [
           ListingSummary(listing: listing),
           const SectionHeader(title: 'Offered by'),

@@ -1,21 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:souq_skills/core/app_theme.dart';
 import 'package:souq_skills/models/skill_listing.dart';
+import 'package:souq_skills/services/listing_service.dart';
 
 import 'category_icon.dart';
 import 'info_card.dart';
 import 'info_tile.dart';
+import 'listing_tags.dart';
 
-/// The full description of a listing, shared by its preview and details pages.
+/// The full description of a listing.
 class ListingSummary extends StatelessWidget {
   const ListingSummary({required this.listing, super.key});
 
   final SkillListing listing;
-
-  String get _format => [
-    listing.onlineOnly ? 'Online' : 'In person or online',
-    if (listing.womenOnly) 'Women only',
-  ].join(' • ');
 
   @override
   Widget build(BuildContext context) => Column(
@@ -41,6 +38,10 @@ class ListingSummary extends StatelessWidget {
           ),
         ],
       ),
+      if (listing.tags.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        ListingTags(listing: listing),
+      ],
       const SizedBox(height: 16),
       Text(listing.description, style: const TextStyle(height: 1.5)),
       const SizedBox(height: 16),
@@ -68,7 +69,7 @@ class ListingSummary extends StatelessWidget {
           ),
           InfoTile(
             label: 'Location',
-            value: '${listing.city} • $_format',
+            value: ListingService().locationLabel(listing),
             icon: Icons.location_on_outlined,
           ),
         ],

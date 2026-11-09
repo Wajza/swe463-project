@@ -14,16 +14,20 @@ class TransactionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isCredit = transaction.amount >= 0;
     final color = isCredit ? context.colors.primary : context.colors.error;
+    final tradeId = transaction.tradeId;
     return Card(
       child: ListTile(
-        onTap: () =>
-            context.open(AppRoutes.transactionDetails, args: transaction.id),
+        onTap: tradeId == null
+            ? null
+            : () => context.open(AppRoutes.tradeDetails, args: tradeId),
         leading: Icon(
           isCredit ? Icons.add_circle_outline : Icons.remove_circle_outline,
           color: color,
         ),
         title: Text(transaction.title),
-        subtitle: Text(transaction.subtitle),
+        subtitle: Text(
+          '${transaction.subtitle}\n${AppFormatters.date(transaction.date)}',
+        ),
         trailing: Text(
           AppFormatters.signedCredits(transaction.amount),
           style: TextStyle(color: color, fontWeight: FontWeight.bold),

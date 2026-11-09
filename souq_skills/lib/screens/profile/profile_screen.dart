@@ -24,13 +24,11 @@ class ProfileScreen extends StatelessWidget {
 
   static const _me = User.currentUserId;
   static const _links = <(String, IconData, String)>[
-    ('My listings', Icons.storefront_outlined, AppRoutes.myListings),
-    ('My skills', Icons.auto_awesome_outlined, AppRoutes.mySkills),
     ('My trades', Icons.swap_horiz, AppRoutes.myTrades),
-    ('Trade history', Icons.history, AppRoutes.tradeHistory),
+    ('My listings', Icons.storefront_outlined, AppRoutes.myListings),
     ('Group trades', Icons.groups_outlined, AppRoutes.groupTrades),
+    ('My skills', Icons.auto_awesome_outlined, AppRoutes.mySkills),
     ('Saved skills', Icons.favorite_border, AppRoutes.savedSkills),
-    ('Account details', Icons.person_outline, AppRoutes.accountDetails),
   ];
 
   @override
@@ -65,7 +63,7 @@ class ProfileScreen extends StatelessWidget {
                 value: '${TradeService().completedCount()}',
                 label: 'Trades',
                 icon: Icons.swap_horiz,
-                onTap: () => context.open(AppRoutes.tradeHistory),
+                onTap: () => context.open(AppRoutes.myTrades),
               ),
               StatTile(
                 value: '${WalletService().balance}',
@@ -75,17 +73,9 @@ class ProfileScreen extends StatelessWidget {
               ),
             ],
           ),
-          SectionHeader(
-            title: 'Badges ($earned/${badges.length})',
-            actionLabel: 'See all',
-            onAction: () => context.open(AppRoutes.badges),
-          ),
+          SectionHeader(title: 'Badges ($earned/${badges.length})'),
           BadgeStrip(badges: badges),
-          SectionHeader(
-            title: 'Ratings and reviews',
-            actionLabel: 'See all',
-            onAction: () => context.open(AppRoutes.reviews),
-          ),
+          const SectionHeader(title: 'Ratings and reviews'),
           RatingSummary(
             memberId: _me,
             onTap: () => context.open(AppRoutes.reviews),

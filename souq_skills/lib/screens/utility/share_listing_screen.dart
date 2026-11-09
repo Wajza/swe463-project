@@ -8,10 +8,8 @@ import 'package:souq_skills/screens/shared/live_entity.dart';
 import 'package:souq_skills/services/chat_service.dart';
 import 'package:souq_skills/services/listing_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
-import 'package:souq_skills/widgets/info_card.dart';
-import 'package:souq_skills/widgets/info_tile.dart';
-import 'package:souq_skills/widgets/section_header.dart';
-import 'package:souq_skills/widgets/souq_button.dart';
+import 'package:souq_skills/widgets/settings_group.dart';
+import 'package:souq_skills/widgets/settings_tile.dart';
 
 class ShareListingScreen extends StatelessWidget {
   const ShareListingScreen({required this.listingId, super.key});
@@ -47,25 +45,29 @@ class ShareListingScreen extends StatelessWidget {
       return AppPage(
         title: 'Share listing',
         children: [
-          InfoCard(
-            tiles: [
-              InfoTile(label: listing.title, value: _link, icon: Icons.link),
+          SettingsGroup(
+            children: [
+              SettingsTile(
+                title: 'Copy link',
+                subtitle: _link,
+                icon: Icons.copy,
+                trailing: const SizedBox.shrink(),
+                onTap: () => _copy(context),
+              ),
             ],
           ),
-          SouqButton(
-            label: 'Copy link',
-            icon: Icons.copy,
-            onPressed: () => _copy(context),
-          ),
-          if (direct.isNotEmpty) const SectionHeader(title: 'Send in a chat'),
-          for (final conversation in direct)
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.send_outlined),
-                title: Text(conversation.title),
-                onTap: () =>
-                    _sendToChat(context, listing, conversation.memberId!),
-              ),
+          if (direct.isNotEmpty)
+            SettingsGroup(
+              title: 'Send in a chat',
+              children: [
+                for (final conversation in direct)
+                  SettingsTile(
+                    title: conversation.title,
+                    icon: Icons.send_outlined,
+                    onTap: () =>
+                        _sendToChat(context, listing, conversation.memberId!),
+                  ),
+              ],
             ),
         ],
       );

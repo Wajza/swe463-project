@@ -1,13 +1,6 @@
 import 'identifiable.dart';
 
-enum NotificationType {
-  message,
-  trade,
-  groupTrade,
-  review,
-  searchAlert,
-  system,
-}
+enum NotificationType { message, trade, groupTrade, review, system }
 
 class AppNotification implements Identifiable {
   const AppNotification({
@@ -41,4 +34,27 @@ class AppNotification implements Identifiable {
     route: route,
     routeArgument: routeArgument,
   );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'message': message,
+    'createdAt': createdAt.toIso8601String(),
+    'type': type.name,
+    'isRead': isRead,
+    'route': route,
+    'routeArgument': routeArgument,
+  };
+
+  factory AppNotification.fromJson(Map<String, dynamic> json) =>
+      AppNotification(
+        id: json['id'] as String,
+        title: json['title'] as String,
+        message: json['message'] as String,
+        createdAt: DateTime.parse(json['createdAt'] as String),
+        type: NotificationType.values.byName(json['type'] as String),
+        isRead: json['isRead'] as bool,
+        route: json['route'] as String?,
+        routeArgument: json['routeArgument'] as String?,
+      );
 }

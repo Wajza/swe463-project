@@ -1,6 +1,7 @@
 import 'package:souq_skills/core/app_routes.dart';
 import 'package:souq_skills/models/notification.dart';
 import 'package:souq_skills/models/trade.dart';
+import 'package:souq_skills/models/transaction.dart';
 
 import 'badge_service.dart';
 import 'chat_service.dart';
@@ -49,6 +50,16 @@ class TradeService {
       tradeId: id,
       participantName: memberName,
     );
+    if (trade.creditsPaid > 0) {
+      WalletService().record(
+        title: 'Credits paid',
+        subtitle: trade.title,
+        amount: -trade.creditsPaid,
+        type: TransactionType.spent,
+        tradeId: id,
+        participantName: memberName,
+      );
+    }
     ChatService().postSystem(trade.otherMemberId, 'Trade marked as complete.');
     NotificationService().push(
       title: 'How was your exchange?',

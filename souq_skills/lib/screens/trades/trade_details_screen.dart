@@ -14,65 +14,71 @@ import 'package:souq_skills/widgets/app_page.dart';
 import 'package:souq_skills/widgets/info_card.dart';
 import 'package:souq_skills/widgets/info_tile.dart';
 import 'package:souq_skills/widgets/member_tile.dart';
+import 'package:souq_skills/widgets/overflow_menu.dart';
+import 'package:souq_skills/widgets/proposal_card.dart';
 import 'package:souq_skills/widgets/review_card.dart';
 import 'package:souq_skills/widgets/section_header.dart';
 import 'package:souq_skills/widgets/souq_button.dart';
 import 'package:souq_skills/widgets/status_chip.dart';
+import 'package:souq_skills/widgets/status_timeline.dart';
 
 class TradeDetailsScreen extends StatelessWidget {
   const TradeDetailsScreen({required this.tradeId, super.key});
 
   final String tradeId;
 
-  List<Widget> _actions(BuildContext context, Trade trade, bool hasSession) =>
+  void _complete(BuildContext context) {
+    TradeService().complete(tradeId);
+    context.replaceWith(AppRoutes.rateTrade, args: tradeId);
+  }
+
+  /// The one next step for the trade's current status.
+  Widget? _nextStep(BuildContext context, Trade trade, bool hasSession) =>
       switch (trade.status) {
-        TradeStatus.pending => [
-          SouqButton(
-            label: 'View proposal',
-            onPressed: () =>
-                context.open(AppRoutes.proposalDetails, args: trade.proposalId),
-          ),
-        ],
-        TradeStatus.accepted when !hasSession => [
-          SouqButton(
-            label: 'Schedule session',
-            icon: Icons.event_outlined,
-            onPressed: () =>
-                context.open(AppRoutes.scheduleSession, args: tradeId),
-          ),
-        ],
-        TradeStatus.accepted => [
-          SouqButton(
-            label: 'Mark as complete',
-            icon: Icons.task_alt,
-            onPressed: () =>
-                context.open(AppRoutes.tradeCompletion, args: tradeId),
-          ),
-          SouqButton(
-            label: 'Reschedule',
-            outlined: true,
-            onPressed: () =>
-                context.open(AppRoutes.scheduleSession, args: tradeId),
-          ),
-        ],
-        TradeStatus.completed when !ReviewService().hasRated(tradeId) => [
+        TradeStatus.accepted when !hasSession => SouqButton(
+          label: 'Schedule session',
+          icon: Icons.event_outlined,
+          onPressed: () =>
+              context.open(AppRoutes.scheduleSession, args: tradeId),
+        ),
+        TradeStatus.accepted => SouqButton(
+          label: 'Mark as complete',
+          icon: Icons.task_alt,
+          onPressed: () => _complete(context),
+        ),
+        TradeStatus.completed when !ReviewService().hasRated(tradeId) =>
           SouqButton(
             label: 'Rate this experience',
             icon: Icons.star_outline,
             onPressed: () => context.open(AppRoutes.rateTrade, args: tradeId),
           ),
-        ],
-        TradeStatus.disputed => [
-          SouqButton(
-            label: 'View case',
-            onPressed: () => context.open(
-              AppRoutes.disputeCaseDetails,
-              args: SafetyService().caseForTrade(tradeId)?.id,
-            ),
+        TradeStatus.disputed => SouqButton(
+          label: 'View case',
+          onPressed: () => context.open(
+            AppRoutes.disputeCaseDetails,
+            args: SafetyService().caseForTrade(tradeId)?.id,
           ),
-        ],
-        _ => const [],
+        ),
+        _ => null,
       };
+
+  List<MenuAction> _menu(BuildContext context, Trade trade, bool hasSession) =>
+      [
+        if (trade.status == TradeStatus.accepted && hasSession)
+          MenuAction(
+            'Reschedule',
+            () => context.open(AppRoutes.scheduleSession, args: tradeId),
+          ),
+        MenuAction(
+          'Report trade',
+          () => context.open(AppRoutes.reportTrade, args: tradeId),
+        ),
+        if (trade.status == TradeStatus.accepted)
+          MenuAction(
+            'Open a dispute',
+            () => context.open(AppRoutes.disputeTrade, args: tradeId),
+          ),
+      ];
 
   List<InfoTile> _sessionTiles(TradeSession session) => [
     InfoTile(
@@ -89,6 +95,23 @@ class TradeDetailsScreen extends StatelessWidget {
     ),
   ];
 
+  List<TimelineEntry> _timeline(Trade trade) => [
+    const TimelineEntry('Proposal sent', isDone: true),
+    TimelineEntry(
+      'Proposal accepted',
+      isDone:
+          trade.status == TradeStatus.accepted ||
+          trade.isComplete ||
+          trade.status == TradeStatus.disputed,
+    ),
+    TimelineEntry('Session scheduled', isDone: trade.sessionId != null),
+    TimelineEntry('Exchange completed', isDone: trade.isComplete),
+    TimelineEntry(
+      'Experience rated',
+      isDone: ReviewService().hasRated(tradeId),
+    ),
+  ];
+
   @override
   Widget build(BuildContext context) => LiveEntity<Trade>(
     find: () => TradeService().byId(tradeId),
@@ -99,22 +122,15 @@ class TradeDetailsScreen extends StatelessWidget {
       return AppPage(
         title: 'Trade details',
         actions: [
-          PopupMenuButton<String>(
-            onSelected: (route) => context.open(route, args: tradeId),
-            itemBuilder: (_) => [
-              const PopupMenuItem(
-                value: AppRoutes.reportTrade,
-                child: Text('Report trade'),
-              ),
-              if (trade.status == TradeStatus.accepted)
-                const PopupMenuItem(
-                  value: AppRoutes.disputeTrade,
-                  child: Text('Open a dispute'),
-                ),
-            ],
+          IconButton(
+            tooltip: 'Open chat',
+            onPressed: () =>
+                context.open(AppRoutes.chat, args: trade.otherMemberId),
+            icon: const Icon(Icons.chat_outlined),
           ),
+          OverflowMenu(items: _menu(context, trade, session != null)),
         ],
-        footer: _actions(context, trade, session != null),
+        action: _nextStep(context, trade, session != null),
         children: [
           Align(
             alignment: Alignment.centerLeft,
@@ -125,7 +141,7 @@ class TradeDetailsScreen extends StatelessWidget {
             tiles: [
               InfoTile(
                 label: 'You give',
-                value: trade.offeredSkill,
+                value: trade.givenLabel,
                 icon: Icons.volunteer_activism_outlined,
               ),
               InfoTile(
@@ -147,26 +163,16 @@ class TradeDetailsScreen extends StatelessWidget {
               ...?(session == null ? null : _sessionTiles(session)),
             ],
           ),
+          if (proposal != null && trade.status == TradeStatus.pending)
+            ProposalCard(proposal: proposal),
           const SectionHeader(title: 'Trading with'),
           MemberTile(memberId: trade.otherMemberId),
-          SouqButton(
-            label: 'Open chat',
-            outlined: true,
-            icon: Icons.chat_outlined,
-            onPressed: () =>
-                context.open(AppRoutes.chat, args: trade.otherMemberId),
-          ),
-          const SizedBox(height: 10),
-          SouqButton(
-            label: 'Track status',
-            outlined: true,
-            icon: Icons.timeline,
-            onPressed: () => context.open(AppRoutes.tradeStatus, args: tradeId),
-          ),
           if (myReview != null) ...[
             const SectionHeader(title: 'Your rating'),
             ReviewCard(review: myReview),
           ],
+          const SectionHeader(title: 'Progress'),
+          StatusTimeline(entries: _timeline(trade)),
         ],
       );
     },

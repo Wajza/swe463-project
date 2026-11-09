@@ -1,4 +1,4 @@
-/// Fixed choices offered by the app's forms.
+/// Fixed choices offered by the app's selection controls.
 class AppOptions {
   const AppOptions._();
 
@@ -12,6 +12,41 @@ class AppOptions {
     'Madinah',
   ];
   static const deliveryMethods = ['Online', 'In person'];
+  static const sessionLengths = [30, 45, 60, 90, 120];
+  static const availabilities = [
+    'Mornings',
+    'Afternoons',
+    'Weekday evenings',
+    'Weekends',
+    'Flexible',
+  ];
+  static const meetingPlaces = [
+    'Public library',
+    'Café',
+    'Community centre',
+    'University campus',
+  ];
+  static const ratingTags = [
+    'Great teacher',
+    'On time',
+    'Friendly',
+    'Well prepared',
+    'Would trade again',
+  ];
+  static const quickReplies = [
+    'Sounds good!',
+    'When are you free?',
+    'Can we reschedule?',
+    'Thank you!',
+  ];
+  static const creditAmounts = [10, 20, 30, 50];
+  static const complaintTopics = [
+    'A trade',
+    'A member',
+    'My wallet',
+    'My account',
+    'Something else',
+  ];
   static const memberReportReasons = [
     'Harassment',
     'Spam or scam',
@@ -25,5 +60,4 @@ class AppOptions {
     'Unsafe behaviour',
     'Other',
   ];
-  static const supportSubjects = ['Account', 'Trades', 'Wallet', 'Other'];
 }

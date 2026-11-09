@@ -31,4 +31,27 @@ class WalletTransaction implements Identifiable {
   final TransactionType type;
   final String? tradeId;
   final String? participantName;
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'subtitle': subtitle,
+    'amount': amount,
+    'date': date.toIso8601String(),
+    'type': type.name,
+    'tradeId': tradeId,
+    'participantName': participantName,
+  };
+
+  factory WalletTransaction.fromJson(Map<String, dynamic> json) =>
+      WalletTransaction(
+        id: json['id'] as String,
+        title: json['title'] as String,
+        subtitle: json['subtitle'] as String,
+        amount: json['amount'] as int,
+        date: DateTime.parse(json['date'] as String),
+        type: TransactionType.values.byName(json['type'] as String),
+        tradeId: json['tradeId'] as String?,
+        participantName: json['participantName'] as String?,
+      );
 }

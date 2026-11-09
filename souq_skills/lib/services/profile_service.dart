@@ -30,8 +30,6 @@ class ProfileService {
     (user) => user.copyWith(skillsWanted: _removed(user.skillsWanted, skill)),
   );
 
-  void setCity(String city) => _updateUser((user) => user.copyWith(city: city));
-
   void _updateUser(User Function(User current) change) =>
       _repo.updateUser(change(_repo.currentUser));
 

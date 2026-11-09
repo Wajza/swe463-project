@@ -9,6 +9,7 @@ import 'package:souq_skills/services/member_service.dart';
 import 'package:souq_skills/services/review_service.dart';
 
 import 'category_icon.dart';
+import 'listing_tags.dart';
 import 'status_chip.dart';
 
 class ListingCard extends StatelessWidget {
@@ -18,9 +19,9 @@ class ListingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final service = ListingService();
     final owner = MemberService().nameOf(listing.ownerId);
     final rating = ReviewService().averageRatingOf(listing.ownerId);
-    final isMine = ListingService().isMine(listing);
     return Card(
       child: InkWell(
         onTap: () => context.open(AppRoutes.listingDetails, args: listing.id),
@@ -44,7 +45,8 @@ class ListingCard extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      '$owner • ★ ${AppFormatters.rating(rating)} • ${listing.city}',
+                      '$owner • ★ ${AppFormatters.rating(rating)} • '
+                      '${service.locationLabel(listing)}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: context.textStyles.bodySmall,
@@ -57,15 +59,16 @@ class ListingCard extends StatelessWidget {
                         color: context.colors.primary,
                       ),
                     ),
+                    if (listing.tags.isNotEmpty) ListingTags(listing: listing),
                   ],
                 ),
               ),
               if (listing.isPaused)
                 const StatusChip(label: 'Paused', tone: StatusTone.waiting)
-              else if (!isMine)
+              else if (!service.isMine(listing))
                 IconButton(
                   tooltip: listing.isSaved ? 'Remove from saved' : 'Save skill',
-                  onPressed: () => ListingService().toggleSaved(listing.id),
+                  onPressed: () => service.toggleSaved(listing.id),
                   icon: Icon(
                     listing.isSaved ? Icons.favorite : Icons.favorite_border,
                     color: context.colors.primary,

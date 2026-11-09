@@ -18,8 +18,11 @@ class OtpVerificationScreen extends StatefulWidget {
 }
 
 class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
+  static const _demoCode = '123456';
+
   final _formKey = GlobalKey<FormState>();
-  final _code = TextEditingController();
+  // Stands in for reading the code from the SMS automatically.
+  final _code = TextEditingController(text: _demoCode);
 
   @override
   void dispose() {
@@ -29,40 +32,37 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
 
   void _verify() {
     if (!_formKey.currentState!.validate()) return;
-    if (widget.request.isReturningUser) {
-      AuthService().signIn();
-      context.resetTo(AppRoutes.home);
-    } else {
-      context.replaceWith(
-        AppRoutes.createAccountProfile,
-        args: widget.request.phone,
-      );
+    switch (widget.request.purpose) {
+      case OtpPurpose.signIn:
+        AuthService().signIn();
+        context.resetTo(AppRoutes.home);
+      case OtpPurpose.signUp:
+        context.replaceWith(
+          AppRoutes.createAccountProfile,
+          args: widget.request.phone,
+        );
+      case OtpPurpose.changePhone:
+        context.back(true);
     }
   }
 
   @override
   Widget build(BuildContext context) => AppPage(
     title: 'Verify phone',
-    body: Form(
-      key: _formKey,
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          children: [
-            const Text('Enter the 6-digit code sent to your phone.'),
-            const SizedBox(height: 20),
-            AppTextField(
-              controller: _code,
-              label: 'Verification code',
-              keyboardType: TextInputType.number,
-              maxLength: 6,
-              validator: AppValidators.otp,
-            ),
-            const Spacer(),
-            SouqButton(label: 'Verify', onPressed: _verify),
-          ],
+    action: SouqButton(label: 'Verify', onPressed: _verify),
+    children: [
+      Text('Enter the 6-digit code sent to +966 ${widget.request.phone}.'),
+      const SizedBox(height: 20),
+      Form(
+        key: _formKey,
+        child: AppTextField(
+          controller: _code,
+          label: 'Verification code',
+          keyboardType: TextInputType.number,
+          maxLength: 6,
+          validator: AppValidators.otp,
         ),
       ),
-    ),
+    ],
   );
 }

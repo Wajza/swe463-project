@@ -7,8 +7,6 @@ import 'package:souq_skills/widgets/info_card.dart';
 import 'package:souq_skills/widgets/info_tile.dart';
 import 'package:souq_skills/widgets/live_view.dart';
 import 'package:souq_skills/widgets/section_header.dart';
-import 'package:souq_skills/widgets/settings_group.dart';
-import 'package:souq_skills/widgets/settings_tile.dart';
 import 'package:souq_skills/widgets/status_chip.dart';
 
 class SafetyCentreScreen extends StatelessWidget {
@@ -37,26 +35,6 @@ class SafetyCentreScreen extends StatelessWidget {
                 label: 'Speak up',
                 value: 'Report a member from their profile menu.',
                 icon: Icons.flag_outlined,
-              ),
-            ],
-          ),
-          SettingsGroup(
-            title: 'Get help',
-            children: [
-              SettingsTile(
-                title: 'Community guidelines',
-                icon: Icons.groups_outlined,
-                onTap: () => context.open(AppRoutes.communityGuidelines),
-              ),
-              SettingsTile(
-                title: 'Blocked members',
-                icon: Icons.block,
-                onTap: () => context.open(AppRoutes.blockedMembers),
-              ),
-              SettingsTile(
-                title: 'Support messages',
-                icon: Icons.forum_outlined,
-                onTap: () => context.open(AppRoutes.supportMessages),
               ),
             ],
           ),

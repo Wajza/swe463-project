@@ -7,11 +7,10 @@ import 'package:souq_skills/screens/utility/not_found_screen.dart';
 import 'package:souq_skills/services/trade_service.dart';
 import 'package:souq_skills/services/trade_session_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
-import 'package:souq_skills/widgets/app_text_field.dart';
 import 'package:souq_skills/widgets/choice_chip_row.dart';
+import 'package:souq_skills/widgets/form_section.dart';
 import 'package:souq_skills/widgets/info_card.dart';
 import 'package:souq_skills/widgets/info_tile.dart';
-import 'package:souq_skills/widgets/section_header.dart';
 import 'package:souq_skills/widgets/souq_button.dart';
 
 class ScheduleSessionScreen extends StatefulWidget {
@@ -28,21 +27,16 @@ class _ScheduleSessionScreenState extends State<ScheduleSessionScreen> {
   late final _existing = TradeSessionService().byId(_trade?.sessionId);
   late DateTime _scheduledAt = _existing?.scheduledAt ?? _defaultTime();
   late String _method = _existing?.method ?? AppOptions.deliveryMethods.first;
-  late final _location = TextEditingController(
-    text: _existing?.locationOrLink ?? '',
-  );
-  late final _notes = TextEditingController(text: _existing?.notes ?? '');
+  late String _place =
+      AppOptions.meetingPlaces.contains(_existing?.locationOrLink)
+      ? _existing!.locationOrLink
+      : AppOptions.meetingPlaces.first;
+
+  bool get _isInPerson => _method == AppOptions.deliveryMethods.last;
 
   DateTime _defaultTime() {
     final now = DateTime.now();
     return DateTime(now.year, now.month, now.day + 1, 18);
-  }
-
-  @override
-  void dispose() {
-    _location.dispose();
-    _notes.dispose();
-    super.dispose();
   }
 
   Future<void> _pickDate() async {
@@ -83,12 +77,16 @@ class _ScheduleSessionScreenState extends State<ScheduleSessionScreen> {
   }
 
   void _save() {
+    if (_scheduledAt.isBefore(DateTime.now())) {
+      context.showMessage('Choose a time in the future');
+      return;
+    }
     TradeSessionService().schedule(
       tradeId: widget.tradeId,
       scheduledAt: _scheduledAt,
       method: _method,
-      locationOrLink: _location.text.trim(),
-      notes: _notes.text.trim(),
+      locationOrLink: _isInPerson ? _place : '',
+      notes: '',
     );
     context.back();
     context.showMessage('Session scheduled');
@@ -99,7 +97,7 @@ class _ScheduleSessionScreenState extends State<ScheduleSessionScreen> {
     if (_trade == null) return const NotFoundScreen();
     return AppPage(
       title: 'Schedule session',
-      footer: [SouqButton(label: 'Save session', onPressed: _save)],
+      action: SouqButton(label: 'Save session', onPressed: _save),
       children: [
         InfoCard(
           tiles: [
@@ -107,31 +105,35 @@ class _ScheduleSessionScreenState extends State<ScheduleSessionScreen> {
               label: 'Date',
               value: AppFormatters.date(_scheduledAt),
               icon: Icons.calendar_today_outlined,
-              trailing: const Icon(Icons.edit_outlined),
+              trailing: const Icon(Icons.expand_more),
               onTap: _pickDate,
             ),
             InfoTile(
               label: 'Time',
               value: AppFormatters.time(_scheduledAt),
               icon: Icons.access_time,
-              trailing: const Icon(Icons.edit_outlined),
+              trailing: const Icon(Icons.expand_more),
               onTap: _pickTime,
             ),
           ],
         ),
-        const SectionHeader(title: 'Method'),
-        ChoiceChipRow<String>(
-          options: AppOptions.deliveryMethods,
-          selected: _method,
-          onSelected: (value) => setState(() => _method = value),
+        FormSection(
+          title: 'Method',
+          child: ChoiceChipRow<String>(
+            options: AppOptions.deliveryMethods,
+            selected: _method,
+            onSelected: (value) => setState(() => _method = value),
+          ),
         ),
-        const SizedBox(height: 16),
-        AppTextField(controller: _location, label: 'Location or meeting link'),
-        AppTextField(
-          controller: _notes,
-          label: 'Notes (optional)',
-          maxLines: 3,
-        ),
+        if (_isInPerson)
+          FormSection(
+            title: 'Meeting place',
+            child: ChoiceChipRow<String>(
+              options: AppOptions.meetingPlaces,
+              selected: _place,
+              onSelected: (value) => setState(() => _place = value),
+            ),
+          ),
       ],
     );
   }

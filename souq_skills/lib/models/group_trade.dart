@@ -1,7 +1,7 @@
 import 'identifiable.dart';
 
 enum GroupTradeStatus {
-  open('Open'),
+  open('Active'),
   negotiating('Negotiating'),
   accepted('Accepted'),
   completed('Completed'),
@@ -57,5 +57,29 @@ class GroupTrade implements Identifiable {
     status: status ?? this.status,
     description: description ?? this.description,
     sessionsMinutes: sessionsMinutes ?? this.sessionsMinutes,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'ownerId': ownerId,
+    'memberIds': memberIds,
+    'invitedIds': invitedIds,
+    'skills': skills,
+    'status': status.name,
+    'description': description,
+    'sessionsMinutes': sessionsMinutes,
+  };
+
+  factory GroupTrade.fromJson(Map<String, dynamic> json) => GroupTrade(
+    id: json['id'] as String,
+    title: json['title'] as String,
+    ownerId: json['ownerId'] as String,
+    memberIds: List<String>.from(json['memberIds'] as List),
+    invitedIds: List<String>.from(json['invitedIds'] as List),
+    skills: List<String>.from(json['skills'] as List),
+    status: GroupTradeStatus.values.byName(json['status'] as String),
+    description: json['description'] as String,
+    sessionsMinutes: json['sessionsMinutes'] as int,
   );
 }

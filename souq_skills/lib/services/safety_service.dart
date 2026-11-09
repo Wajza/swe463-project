@@ -1,10 +1,16 @@
+import 'package:souq_skills/core/app_routes.dart';
 import 'package:souq_skills/models/dispute_case.dart';
+import 'package:souq_skills/models/notification.dart';
 import 'package:souq_skills/models/trade.dart';
 import 'package:souq_skills/models/user.dart';
 
+import 'notification_service.dart';
 import 'repository.dart';
 
 class SafetyService {
+  static const complaintReceivedMessage =
+      'We received your complaint. You will get feedback from us soon.';
+
   final Repository _repo = Repository.instance;
 
   List<DisputeCase> cases() => _repo.disputes.reversed.toList();
@@ -25,26 +31,30 @@ class SafetyService {
   DisputeCase reportMember({
     required String memberId,
     required String reason,
-    required String details,
-  }) => _file(CaseKind.memberReport, reason, details, memberId: memberId);
+  }) => _file(CaseKind.memberReport, reason, memberId: memberId);
 
-  DisputeCase reportTrade({
-    required String tradeId,
-    required String reason,
-    required String details,
-  }) => _file(CaseKind.tradeReport, reason, details, tradeId: tradeId);
+  DisputeCase reportTrade({required String tradeId, required String reason}) =>
+      _file(CaseKind.tradeReport, reason, tradeId: tradeId);
 
-  DisputeCase disputeTrade({
-    required String tradeId,
-    required String reason,
-    required String details,
-  }) {
+  DisputeCase disputeTrade({required String tradeId, required String reason}) {
     _repo.update(
       _repo.trades,
       tradeId,
       (trade) => trade.copyWith(status: TradeStatus.disputed),
     );
-    return _file(CaseKind.tradeDispute, reason, details, tradeId: tradeId);
+    return _file(CaseKind.tradeDispute, reason, tradeId: tradeId);
+  }
+
+  DisputeCase fileComplaint(String topic) {
+    final complaint = _file(CaseKind.complaint, topic);
+    NotificationService().push(
+      title: 'Complaint received',
+      message: complaintReceivedMessage,
+      type: NotificationType.system,
+      route: AppRoutes.disputeCaseDetails,
+      routeArgument: complaint.id,
+    );
+    return complaint;
   }
 
   void blockMember(String memberId) {
@@ -59,8 +69,7 @@ class SafetyService {
 
   DisputeCase _file(
     CaseKind kind,
-    String reason,
-    String details, {
+    String reason, {
     String? tradeId,
     String? memberId,
   }) {
@@ -69,7 +78,6 @@ class SafetyService {
       caseNumber: 'SQ-${1000 + _repo.disputes.length}',
       kind: kind,
       reason: reason,
-      details: details.trim(),
       tradeId: tradeId,
       memberId: memberId,
       createdAt: DateTime.now(),

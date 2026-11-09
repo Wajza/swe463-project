@@ -8,6 +8,7 @@ import 'package:souq_skills/models/user.dart';
 
 import 'badge_service.dart';
 import 'chat_service.dart';
+import 'group_trade_service.dart';
 import 'member_service.dart';
 import 'notification_service.dart';
 import 'proposal_service.dart';
@@ -15,26 +16,35 @@ import 'repository.dart';
 
 /// Stands in for the other members and support staff until a backend exists.
 class MemberSimulator {
-  static Duration replyDelay = const Duration(seconds: 2);
+  static const replyDelay = Duration(seconds: 2);
+
+  /// Long enough for a member to counter their own proposal first.
+  static const proposalReplyDelay = Duration(seconds: 30);
 
   final Repository _repo = Repository.instance;
 
-  void acceptProposal(String proposalId) =>
-      _later(() => ProposalService().accept(proposalId, byOtherMember: true));
+  void acceptProposal(String proposalId) => _later(
+    () => ProposalService().accept(proposalId, byOtherMember: true),
+    delay: proposalReplyDelay,
+  );
+
+  void acceptGroupInvitation(String groupId, String memberId) =>
+      _later(() => GroupTradeService().memberAccepted(groupId, memberId));
+
+  /// Restarts replies that were still waiting when the app last closed.
+  void resumePendingProposals() {
+    for (final proposal in _repo.proposals) {
+      if (proposal.isPending && proposal.senderId == User.currentUserId) {
+        acceptProposal(proposal.id);
+      }
+    }
+  }
 
   void replyInChat(String memberId) => _later(
     () => ChatService().receive(
       memberId,
       MemberService().nameOf(memberId),
       'Thanks for your message! Let’s arrange the details.',
-    ),
-  );
-
-  void replyFromSupport() => _later(
-    () => ChatService().receive(
-      ChatService.supportConversationId,
-      'Souq Support',
-      'Thanks for reaching out. Our team is looking into this for you.',
     ),
   );
 
@@ -62,7 +72,8 @@ class MemberSimulator {
     BadgeService().sync();
   });
 
-  void _later(void Function() action) => Timer(replyDelay, () {
-    if (_repo.isSignedIn) action();
-  });
+  void _later(void Function() action, {Duration delay = replyDelay}) =>
+      Timer(delay, () {
+        if (_repo.isSignedIn) action();
+      });
 }

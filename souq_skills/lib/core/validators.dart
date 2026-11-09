@@ -1,9 +1,16 @@
 class AppValidators {
   const AppValidators._();
 
-  static String? requiredText(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'This field is required';
+  static String? personName(String? value) {
+    final name = value?.trim() ?? '';
+    if (name.length < 2) return 'Enter a name';
+    if (RegExp(r'[0-9]').hasMatch(name)) return 'Names cannot contain numbers';
+    return null;
+  }
+
+  static String? username(String? value) {
+    if (!RegExp(r'^[a-zA-Z0-9_]{3,20}$').hasMatch(value?.trim() ?? '')) {
+      return 'Use 3-20 letters, numbers or underscores';
     }
     return null;
   }
@@ -21,33 +28,5 @@ class AppValidators {
       return 'Enter a valid 6-digit code';
     }
     return null;
-  }
-
-  static String? username(String? value) {
-    final username = value?.trim() ?? '';
-    if (!RegExp(r'^[a-zA-Z0-9_]{3,20}$').hasMatch(username)) {
-      return 'Use 3–20 letters, numbers, or underscores';
-    }
-    return null;
-  }
-
-  static String? positiveMinutes(String? value) {
-    final minutes = int.tryParse(value?.trim() ?? '');
-    if (minutes == null || minutes <= 0) {
-      return 'Enter a positive number of minutes';
-    }
-    return null;
-  }
-
-  static String? listingTitle(String? value) {
-    final error = requiredText(value);
-    if (error != null) return error;
-    return value!.trim().length < 3 ? 'Use at least 3 characters' : null;
-  }
-
-  static String? listingDescription(String? value) {
-    final error = requiredText(value);
-    if (error != null) return error;
-    return value!.trim().length < 10 ? 'Use at least 10 characters' : null;
   }
 }

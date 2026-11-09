@@ -35,4 +35,24 @@ class TradeSession implements Identifiable {
     notes: notes ?? this.notes,
     isCompleted: isCompleted ?? this.isCompleted,
   );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'tradeId': tradeId,
+    'scheduledAt': scheduledAt.toIso8601String(),
+    'method': method,
+    'locationOrLink': locationOrLink,
+    'notes': notes,
+    'isCompleted': isCompleted,
+  };
+
+  factory TradeSession.fromJson(Map<String, dynamic> json) => TradeSession(
+    id: json['id'] as String,
+    tradeId: json['tradeId'] as String,
+    scheduledAt: DateTime.parse(json['scheduledAt'] as String),
+    method: json['method'] as String,
+    locationOrLink: json['locationOrLink'] as String,
+    notes: json['notes'] as String,
+    isCompleted: json['isCompleted'] as bool,
+  );
 }

@@ -2,9 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:souq_skills/core/app_theme.dart';
 
 class WalletBalanceCard extends StatefulWidget {
-  const WalletBalanceCard({required this.balance, super.key});
+  const WalletBalanceCard({
+    required this.balance,
+    required this.held,
+    super.key,
+  });
 
   final int balance;
+  final int held;
 
   @override
   State<WalletBalanceCard> createState() => _WalletBalanceCardState();
@@ -35,6 +40,11 @@ class _WalletBalanceCardState extends State<WalletBalanceCard> {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
+                  if (_isVisible && widget.held > 0)
+                    Text(
+                      '${widget.held} on hold for active trades',
+                      style: TextStyle(color: foreground),
+                    ),
                 ],
               ),
             ),

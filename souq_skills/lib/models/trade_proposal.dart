@@ -23,6 +23,7 @@ class TradeProposal implements Identifiable {
     this.sessionsMinutes = 60,
     this.deliveryMethod = 'Online',
     this.notes = '',
+    this.creditsOffered = 0,
     this.status = ProposalStatus.pending,
   });
 
@@ -36,9 +37,13 @@ class TradeProposal implements Identifiable {
   final int sessionsMinutes;
   final String deliveryMethod;
   final String notes;
+  final int creditsOffered;
   final ProposalStatus status;
 
   bool get isPending => status == ProposalStatus.pending;
+
+  String get offerLabel =>
+      creditsOffered > 0 ? '$creditsOffered credits' : offeredSkill;
 
   TradeProposal copyWith({
     String? id,
@@ -50,6 +55,7 @@ class TradeProposal implements Identifiable {
     int? sessionsMinutes,
     String? deliveryMethod,
     String? notes,
+    int? creditsOffered,
     ProposalStatus? status,
   }) => TradeProposal(
     id: id ?? this.id,
@@ -61,6 +67,35 @@ class TradeProposal implements Identifiable {
     sessionsMinutes: sessionsMinutes ?? this.sessionsMinutes,
     deliveryMethod: deliveryMethod ?? this.deliveryMethod,
     notes: notes ?? this.notes,
+    creditsOffered: creditsOffered ?? this.creditsOffered,
     status: status ?? this.status,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'tradeId': tradeId,
+    'offeredSkill': offeredSkill,
+    'requestedSkill': requestedSkill,
+    'senderId': senderId,
+    'receiverId': receiverId,
+    'sessionsMinutes': sessionsMinutes,
+    'deliveryMethod': deliveryMethod,
+    'notes': notes,
+    'creditsOffered': creditsOffered,
+    'status': status.name,
+  };
+
+  factory TradeProposal.fromJson(Map<String, dynamic> json) => TradeProposal(
+    id: json['id'] as String,
+    tradeId: json['tradeId'] as String,
+    offeredSkill: json['offeredSkill'] as String,
+    requestedSkill: json['requestedSkill'] as String,
+    senderId: json['senderId'] as String,
+    receiverId: json['receiverId'] as String,
+    sessionsMinutes: json['sessionsMinutes'] as int,
+    deliveryMethod: json['deliveryMethod'] as String,
+    notes: json['notes'] as String,
+    creditsOffered: json['creditsOffered'] as int,
+    status: ProposalStatus.values.byName(json['status'] as String),
   );
 }

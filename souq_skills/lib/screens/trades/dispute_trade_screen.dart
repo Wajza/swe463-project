@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:souq_skills/core/app_options.dart';
 import 'package:souq_skills/core/app_routes.dart';
+import 'package:souq_skills/core/feedback.dart';
 import 'package:souq_skills/core/navigation.dart';
 import 'package:souq_skills/services/safety_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
@@ -19,13 +20,13 @@ class DisputeTradeScreen extends StatelessWidget {
         intro: 'Tell us what went wrong. The trade is on hold during review.',
         reasons: AppOptions.tradeIssueReasons,
         submitLabel: 'Submit dispute',
-        onSubmit: (reason, details) {
+        onSubmit: (reason) {
           final report = SafetyService().disputeTrade(
             tradeId: tradeId,
             reason: reason,
-            details: details,
           );
-          context.replaceWith(AppRoutes.reportReceived, args: report.id);
+          context.replaceWith(AppRoutes.disputeCaseDetails, args: report.id);
+          context.showMessage('Report received');
         },
       ),
     ],

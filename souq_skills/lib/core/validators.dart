@@ -18,7 +18,7 @@ class AppValidators {
 
   static String? otp(String? value) {
     if (!RegExp(r'^[0-9]{6}$').hasMatch(value?.trim() ?? '')) {
-      return 'Enter the 6-digit verification code';
+      return 'Enter a valid 6-digit code';
     }
     return null;
   }
@@ -50,10 +50,4 @@ class AppValidators {
     if (error != null) return error;
     return value!.trim().length < 10 ? 'Use at least 10 characters' : null;
   }
-
-  static String? tradeProposal(String? value) => requiredText(value);
-
-  static String? supportMessage(String? value) => requiredText(value);
-
-  static String? reportDetails(String? value) => requiredText(value);
 }

@@ -1,64 +1,85 @@
 class AppRoutes {
   const AppRoutes._();
 
+  // Authentication
   static const welcome = '/';
   static const signIn = '/sign-in';
   static const createAccount = '/create-account';
-  static const createAccountProfile = '/create-account/profile';
   static const otpVerification = '/create-account/otp';
+  static const createAccountProfile = '/create-account/profile';
+  static const notificationPermission = '/notification-permission';
+
+  // Main tabs
   static const home = '/home';
+  static const chats = '/chats';
   static const postSkill = '/post';
+  static const wallet = '/wallet';
+  static const profile = '/profile';
+
+  // Posting a skill
   static const skillCategory = '/post/category';
   static const skillDetails = '/post/details';
   static const listingInformation = '/post/information';
   static const listingPreview = '/post/preview';
   static const postConfirmation = '/post/confirmation';
-  static const chats = '/chats';
-  static const wallet = '/wallet';
-  static const profile = '/profile';
-  static const settings = '/settings';
-  static const notifications = '/notifications';
-  static const safety = '/safety';
-  static const groupTrades = '/group-trades';
-  static const listingDetails = '/listing/:id';
-  static const savedSkills = '/saved';
-  static const savedSkillDetails = '/saved/:id';
-  static const savedSearches = '/saved-searches';
+
+  // Discovery
   static const searchResults = '/search';
   static const categoryFilter = '/filters/category';
   static const cityFilter = '/filters/city';
+  static const savedSkills = '/saved';
+  static const savedSearches = '/saved-searches';
   static const searchAlerts = '/search-alerts';
-  static const accountDetails = '/account-details';
-  static const myTrades = '/my-trades';
-  static const tradeHistory = '/trade-history';
+
+  // Listings and members
+  static const listingDetails = '/listing';
+  static const editListing = '/listing/edit';
+  static const shareListing = '/listing/share';
   static const myListings = '/my-listings';
-  static const editListing = '/listing/:id/edit';
-  static const publicSkillList = '/profile/:memberId/skills';
-  static const editProfile = '/edit-profile';
-  static const memberProfile = '/profile/:memberId';
-  static const mySkills = '/my-skills';
-  static const profileTrades = '/profile/trades';
-  static const reviews = '/reviews';
+  static const memberProfile = '/member';
+  static const publicSkillList = '/member/skills';
+
+  // Chats and proposals
   static const chat = '/chat';
-  static const directChat = chat;
+  static const groupChat = '/chat/group';
   static const proposalInsideChat = '/chat/proposal';
   static const counteroffer = '/chat/counteroffer';
-  static const proposalDetails = '/proposal/:id';
-  static const groupChat = '/chats/group/:groupId';
-  static const groupTradeChat = groupChat;
+  static const proposalDetails = '/proposal';
+
+  // Trades
+  static const myTrades = '/my-trades';
+  static const tradeHistory = '/trade-history';
+  static const tradeDetails = '/trade';
+  static const tradeStatus = '/trade/status';
+  static const scheduleSession = '/trade/schedule';
+  static const tradeCompletion = '/trade/completion';
+  static const disputeTrade = '/trade/dispute';
   static const rateTrade = '/rate';
-  static const review = '/review/:id';
-  static const tradeDetails = '/trade/:id';
-  static const tradeStatus = '/trade/:id/status';
-  static const scheduleSession = '/trade/:id/schedule';
-  static const tradeCompletion = '/trade/:id/completion';
-  static const disputeTrade = '/trade/:id/dispute';
-  static const transactionDetails = '/wallet/transaction/:id';
+
+  // Group trades
+  static const groupTrades = '/group-trades';
+  static const createGroupTrade = '/group-trades/new';
+  static const groupTradeDetails = '/group-trades/details';
+  static const editGroupTrade = '/group-trades/edit';
+  static const groupTradeInvitation = '/group-trades/invitation';
+  static const groupTradeCompletion = '/group-trades/completion';
+
+  // Wallet
+  static const transactionDetails = '/wallet/transaction';
+
+  // Profile
+  static const accountDetails = '/account-details';
+  static const editProfile = '/edit-profile';
+  static const mySkills = '/my-skills';
+  static const reviews = '/reviews';
   static const badges = '/badges';
-  static const badgeDetails = '/badges/:id';
+  static const badgeDetails = '/badges/details';
+
+  // Settings
+  static const settings = '/settings';
+  static const appPreferences = '/settings/preferences';
   static const privacySettings = '/settings/privacy';
   static const notificationPreferences = '/settings/notifications';
-  static const appPreferences = '/settings/preferences';
   static const blockedMembers = '/settings/blocked-members';
   static const locationPermission = '/settings/location';
   static const help = '/settings/help';
@@ -68,22 +89,23 @@ class AppRoutes {
   static const about = '/settings/about';
   static const contactSupport = '/settings/contact-support';
   static const deleteAccount = '/settings/delete-account';
-  static const notificationDetails = '/notifications/:id';
-  static const notificationPermission = '/notification-permission';
-  static const reportMember = '/report/:memberId';
-  static const blockMember = '/block/:memberId';
-  static const reportTrade = '/report/trade/:id';
+
+  // Notifications
+  static const notifications = '/notifications';
+  static const notificationDetails = '/notifications/details';
+
+  // Safety
+  static const safety = '/safety';
+  static const reportMember = '/report/member';
+  static const blockMember = '/block/member';
+  static const reportTrade = '/report/trade';
   static const reportReceived = '/report/received';
-  static const disputeCaseDetails = '/disputes/:id';
+  static const disputeCaseDetails = '/disputes';
   static const supportMessages = '/support/messages';
-  static const groupTradeDetails = '/group-trades/:id';
-  static const createGroupTrade = '/group-trades/new';
-  static const editGroupTrade = '/group-trades/:id/edit';
-  static const groupTradeInvitation = '/group-trades/:id/invitation';
-  static const groupTradeCompletion = '/group-trades/:id/completion';
-  static const shareListing = '/listing/:id/share';
+
+  // Screen states
   static const loading = '/loading';
   static const error = '/error';
   static const offline = '/offline';
-  static const notFound = '*';
+  static const notFound = '/not-found';
 }

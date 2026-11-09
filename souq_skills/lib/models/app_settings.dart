@@ -22,9 +22,15 @@ class AppSettings {
   final bool womenOnly;
 
   AppSettings copyWith({
-    bool? darkMode, bool? messageNotifications, bool? tradeNotifications,
-    bool? groupNotifications, bool? searchAlerts, bool? profileVisible,
-    bool? locationVisible, bool? onlineOnly, bool? womenOnly,
+    bool? darkMode,
+    bool? messageNotifications,
+    bool? tradeNotifications,
+    bool? groupNotifications,
+    bool? searchAlerts,
+    bool? profileVisible,
+    bool? locationVisible,
+    bool? onlineOnly,
+    bool? womenOnly,
   }) => AppSettings(
     darkMode: darkMode ?? this.darkMode,
     messageNotifications: messageNotifications ?? this.messageNotifications,
@@ -33,6 +39,7 @@ class AppSettings {
     searchAlerts: searchAlerts ?? this.searchAlerts,
     profileVisible: profileVisible ?? this.profileVisible,
     locationVisible: locationVisible ?? this.locationVisible,
-    onlineOnly: onlineOnly ?? this.onlineOnly, womenOnly: womenOnly ?? this.womenOnly,
+    onlineOnly: onlineOnly ?? this.onlineOnly,
+    womenOnly: womenOnly ?? this.womenOnly,
   );
 }

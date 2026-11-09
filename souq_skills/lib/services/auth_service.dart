@@ -1,17 +1,50 @@
-import '../models/user.dart';
+import 'package:souq_skills/core/validators.dart';
+import 'package:souq_skills/models/user.dart';
+
 import 'repository.dart';
+import 'seed_data.dart';
 
 class AuthService {
-  AuthService({Repository? repository}) : _repository = repository ?? Repository.instance;
-  final Repository _repository;
-  bool get isSignedIn => _repository.currentUser.isVerified;
-  Future<bool> requestOtp(String phone) async => phone.trim().isNotEmpty;
-  Future<bool> verifyOtp(String code) async => RegExp(r'^\d{6}$').hasMatch(code.trim());
-  Future<User> createAccount({required String name, required String username, required String phone}) async {
-    final parts = name.trim().split(RegExp(r'\s+')).where((part) => part.isNotEmpty).take(2);
-    final initials = parts.map((part) => part[0].toUpperCase()).join();
-    _repository.updateUser(User(name: name, initials: initials, username: username, phone: phone, isVerified: true));
-    return _repository.currentUser;
+  final Repository _repo = Repository.instance;
+
+  bool get hasAccount => _repo.hasAccount;
+  bool get isSignedIn => _repo.isSignedIn;
+
+  bool verifyOtp(String code) => AppValidators.otp(code) == null;
+
+  void createAccount({
+    required String name,
+    required String username,
+    required String phone,
+    required String city,
+  }) {
+    _repo.load(
+      SeedData.newMember(
+        User(
+          id: User.currentUserId,
+          name: name,
+          username: username,
+          phone: phone,
+          city: city,
+          isVerified: true,
+        ),
+      ),
+    );
+    _repo.hasAccount = true;
+    _setSignedIn(true);
   }
-  Future<void> signOut() async => _repository.updateUser(const User(name: '', initials: ''));
+
+  void signIn() => _setSignedIn(true);
+
+  void signOut() => _setSignedIn(false);
+
+  void deleteAccount() {
+    _repo.hasAccount = false;
+    _setSignedIn(false);
+  }
+
+  void _setSignedIn(bool value) {
+    _repo.isSignedIn = value;
+    _repo.emitChange();
+  }
 }

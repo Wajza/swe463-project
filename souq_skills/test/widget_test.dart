@@ -2,9 +2,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:souq_skills/app.dart';
 import 'package:souq_skills/screens/home/home_screen.dart';
+import 'package:souq_skills/screens/shell/main_shell.dart';
 import 'package:souq_skills/screens/wallet/wallet_screen.dart';
+import 'package:souq_skills/services/repository.dart';
 
 void main() {
+  setUp(Repository.instance.reset);
+
   testWidgets('welcome screen opens account flow', (tester) async {
     await tester.pumpWidget(const SouqSkillsApp());
 
@@ -24,7 +28,10 @@ void main() {
     await tester.tap(find.text('Continue'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Enter the 6-digit code sent to your phone.'), findsOneWidget);
+    expect(
+      find.text('Enter the 6-digit code sent to your phone.'),
+      findsOneWidget,
+    );
     await tester.enterText(find.byType(TextField), '12345');
     await tester.tap(find.text('Verify'));
     await tester.pumpAndSettle();

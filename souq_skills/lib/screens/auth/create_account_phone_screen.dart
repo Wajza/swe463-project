@@ -1,29 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:souq_skills/core/app_routes.dart';
-import 'package:souq_skills/services/auth_service.dart';
+import 'package:souq_skills/core/navigation.dart';
+import 'package:souq_skills/models/otp_request.dart';
+import 'package:souq_skills/widgets/app_page.dart';
+import 'package:souq_skills/widgets/phone_entry_form.dart';
 
-class CreateAccountPhoneScreen extends StatefulWidget {
+class CreateAccountPhoneScreen extends StatelessWidget {
   const CreateAccountPhoneScreen({super.key});
-  @override State<CreateAccountPhoneScreen> createState() => _CreateAccountPhoneScreenState();
-}
-class _CreateAccountPhoneScreenState extends State<CreateAccountPhoneScreen> {
-  final controller = TextEditingController();
+
   @override
-  void dispose() {
-    controller.dispose();
-    super.dispose();
-  }
-  @override Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Create account')),
-    body: Padding(padding: const EdgeInsets.all(24), child: Column(children: [
-      TextField(controller: controller, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'Phone number')),
-      const Spacer(),
-      SizedBox(width: double.infinity, height: 54, child: FilledButton(onPressed: () async {
-        final sent = await AuthService().requestOtp(controller.text);
-        if (!context.mounted || !sent) return;
-        Navigator.pushNamed(context, AppRoutes.otpVerification,
-            arguments: const {'returningUser': false});
-      }, child: const Text('Continue'))),
-    ])),
+  Widget build(BuildContext context) => AppPage(
+    title: 'Create account',
+    body: PhoneEntryForm(
+      onSubmit: (phone) {
+        context.open(
+          AppRoutes.otpVerification,
+          args: OtpRequest(phone: phone, isReturningUser: false),
+        );
+        return null;
+      },
+    ),
   );
 }

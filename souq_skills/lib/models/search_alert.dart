@@ -1,13 +1,21 @@
-class SearchAlert {
+import 'identifiable.dart';
+import 'saved_search.dart';
+
+class SearchAlert implements Identifiable {
   const SearchAlert({
-    required this.name,
-    required this.search,
-    this.id = '',
+    required this.id,
+    required this.criteria,
     this.isEnabled = true,
   });
 
+  @override
   final String id;
-  final String name;
-  final String search;
+  final SavedSearch criteria;
   final bool isEnabled;
+
+  SearchAlert copyWith({bool? isEnabled}) => SearchAlert(
+    id: id,
+    criteria: criteria,
+    isEnabled: isEnabled ?? this.isEnabled,
+  );
 }

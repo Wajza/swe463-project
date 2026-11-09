@@ -1,21 +1,62 @@
-import '../models/trade.dart';
-import '../models/trade_proposal.dart';
+import 'package:souq_skills/core/app_routes.dart';
+import 'package:souq_skills/models/notification.dart';
+import 'package:souq_skills/models/trade.dart';
+
+import 'badge_service.dart';
+import 'chat_service.dart';
+import 'member_service.dart';
+import 'notification_service.dart';
 import 'repository.dart';
+import 'wallet_service.dart';
 
 class TradeService {
-  TradeService({Repository? repository}) : _repository = repository ?? Repository.instance;
-  final Repository _repository;
-  Future<List<Trade>> getTrades() async => List.unmodifiable(_repository.trades);
-  Future<Trade> createTrade(TradeProposal proposal) async {
-    final trade = Trade(offeredSkill: proposal.offeredSkill, requestedSkill: proposal.requestedSkill, status: TradeStatus.pending);
-    _repository.trades.add(trade);
-    _repository.emitChange();
-    return trade;
-  }
-  Future<void> updateStatus(Trade trade, TradeStatus status) async {
-    final index = _repository.trades.indexWhere((item) => item.id == trade.id);
-    if (index < 0) return;
-    _repository.trades[index] = trade.copyWith(status: status, isComplete: status == TradeStatus.completed);
-    _repository.emitChange();
+  static const completionCredits = 10;
+
+  final Repository _repo = Repository.instance;
+
+  Trade? byId(String id) => _repo.find(_repo.trades, id);
+
+  List<Trade> active() =>
+      _repo.trades.reversed.where((trade) => trade.isActive).toList();
+
+  List<Trade> all() => _repo.trades.reversed.toList();
+
+  int completedCount() =>
+      _repo.trades.where((trade) => trade.isComplete).length;
+
+  /// Finishes a trade: closes its session, pays credits and asks for a rating.
+  void complete(String id) {
+    final trade = byId(id);
+    if (trade == null || trade.status != TradeStatus.accepted) return;
+    _repo.update(
+      _repo.trades,
+      id,
+      (current) => current.copyWith(status: TradeStatus.completed),
+    );
+    final sessionId = trade.sessionId;
+    if (sessionId != null) {
+      _repo.update(
+        _repo.sessions,
+        sessionId,
+        (session) => session.copyWith(isCompleted: true),
+      );
+    }
+    final memberName = MemberService().nameOf(trade.otherMemberId);
+    WalletService().record(
+      title: 'Trade completed',
+      subtitle: trade.title,
+      amount: completionCredits,
+      tradeId: id,
+      participantName: memberName,
+    );
+    ChatService().postSystem(trade.otherMemberId, 'Trade marked as complete.');
+    NotificationService().push(
+      title: 'How was your exchange?',
+      message: 'Rate your trade with $memberName to share your experience.',
+      type: NotificationType.review,
+      route: AppRoutes.rateTrade,
+      routeArgument: id,
+    );
+    BadgeService().sync();
   }
 }

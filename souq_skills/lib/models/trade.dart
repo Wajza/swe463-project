@@ -1,33 +1,63 @@
-enum TradeStatus { pending, accepted, completed, declined, cancelled, disputed }
+import 'identifiable.dart';
 
-class Trade {
+enum TradeStatus {
+  pending('Pending'),
+  accepted('Accepted'),
+  completed('Completed'),
+  declined('Declined'),
+  cancelled('Cancelled'),
+  disputed('Disputed');
+
+  const TradeStatus(this.label);
+  final String label;
+}
+
+/// A skill exchange seen from the current user's side: [offeredSkill] is what
+/// they give and [requestedSkill] is what they receive.
+class Trade implements Identifiable {
   const Trade({
+    required this.id,
+    required this.proposalId,
+    required this.otherMemberId,
     required this.offeredSkill,
     required this.requestedSkill,
-    this.id = '',
-    this.otherMemberName = '',
+    this.sessionsMinutes = 60,
     this.status = TradeStatus.pending,
-    this.isComplete = false,
     this.sessionId,
   });
 
+  @override
   final String id;
+  final String proposalId;
+  final String otherMemberId;
   final String offeredSkill;
   final String requestedSkill;
-  final String otherMemberName;
+  final int sessionsMinutes;
   final TradeStatus status;
-  final bool isComplete;
   final String? sessionId;
 
+  bool get isComplete => status == TradeStatus.completed;
+  bool get isActive =>
+      status == TradeStatus.pending ||
+      status == TradeStatus.accepted ||
+      status == TradeStatus.disputed;
+  String get title => '$offeredSkill ⇄ $requestedSkill';
+
   Trade copyWith({
-    String? id, String? offeredSkill, String? requestedSkill,
-    String? otherMemberName, TradeStatus? status, bool? isComplete,
+    String? proposalId,
+    String? offeredSkill,
+    String? requestedSkill,
+    int? sessionsMinutes,
+    TradeStatus? status,
     String? sessionId,
   }) => Trade(
-    id: id ?? this.id, offeredSkill: offeredSkill ?? this.offeredSkill,
+    id: id,
+    proposalId: proposalId ?? this.proposalId,
+    otherMemberId: otherMemberId,
+    offeredSkill: offeredSkill ?? this.offeredSkill,
     requestedSkill: requestedSkill ?? this.requestedSkill,
-    otherMemberName: otherMemberName ?? this.otherMemberName,
-    status: status ?? this.status, isComplete: isComplete ?? this.isComplete,
+    sessionsMinutes: sessionsMinutes ?? this.sessionsMinutes,
+    status: status ?? this.status,
     sessionId: sessionId ?? this.sessionId,
   );
 }

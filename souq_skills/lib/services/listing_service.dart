@@ -1,51 +1,65 @@
-import '../models/skill_listing.dart';
+import 'package:souq_skills/models/saved_search.dart';
+import 'package:souq_skills/models/skill_listing.dart';
+import 'package:souq_skills/models/user.dart';
+
+import 'badge_service.dart';
 import 'repository.dart';
 
 class ListingService {
-  ListingService({Repository? repository}) : _repository = repository ?? Repository.instance;
-  final Repository _repository;
-  Future<List<SkillListing>> getListings({String query = '', String? category, String? city, bool onlineOnly = false}) async {
-    final normalized = query.trim().toLowerCase();
-    return _repository.listings.where((item) {
-      final searchable = '${item.title} ${item.offers} ${item.wants}'.toLowerCase();
-      final matchesQuery = normalized.isEmpty || searchable.contains(normalized);
-      final matchesCategory = category == null || item.category == category;
-      final matchesCity = city == null || item.city == city;
-      return matchesQuery && matchesCategory && matchesCity && (!onlineOnly || item.onlineOnly);
+  final Repository _repo = Repository.instance;
+
+  /// Active listings from other, unblocked members that match [criteria].
+  List<SkillListing> discover(SavedSearch criteria) {
+    final query = criteria.query.trim().toLowerCase();
+    return _repo.listings.where((item) {
+      final text = '${item.title} ${item.offers} ${item.wants}'.toLowerCase();
+      return item.ownerId != User.currentUserId &&
+          !item.isPaused &&
+          !_repo.blockedMemberIds.contains(item.ownerId) &&
+          (query.isEmpty || text.contains(query)) &&
+          (criteria.category == null || item.category == criteria.category) &&
+          (criteria.city == null || item.city == criteria.city) &&
+          (!criteria.onlineOnly || item.onlineOnly) &&
+          (!criteria.womenOnly || item.womenOnly);
     }).toList();
   }
-  Future<void> saveListing(String id) async {
-    final index = _repository.listings.indexWhere((item) => item.id == id);
-    if (index < 0) return;
-    _repository.listings[index] = _repository.listings[index].copyWith(
-      isSaved: !_repository.listings[index].isSaved,
-    );
-    _repository.emitChange();
-  }
 
-  Future<SkillListing> createListing(SkillListing listing) async {
-    _repository.listings.add(listing);
-    _repository.emitChange();
+  SkillListing? byId(String id) => _repo.find(_repo.listings, id);
+
+  List<SkillListing> byOwner(String ownerId) =>
+      _repo.listings.where((item) => item.ownerId == ownerId).toList();
+
+  List<SkillListing> activeByOwner(String ownerId) =>
+      byOwner(ownerId).where((item) => !item.isPaused).toList();
+
+  List<SkillListing> mine() => byOwner(User.currentUserId);
+
+  List<SkillListing> saved() =>
+      _repo.listings.where((item) => item.isSaved).toList();
+
+  bool isMine(SkillListing listing) => listing.ownerId == User.currentUserId;
+
+  SkillListing create(SkillListing draft) {
+    final listing = draft.copyWith(id: _repo.nextId('l'));
+    _repo.insert(_repo.listings, listing);
+    BadgeService().sync();
     return listing;
   }
 
-  Future<SkillListing?> updateListing(SkillListing listing) async {
-    final index = _repository.listings.indexWhere((item) => item.id == listing.id);
-    if (index < 0) return null;
-    _repository.listings[index] = listing;
-    _repository.emitChange();
-    return listing;
-  }
+  void update(SkillListing listing) =>
+      _repo.update(_repo.listings, listing.id, (_) => listing);
 
-  Future<void> deleteListing(String id) async {
-    _repository.listings.removeWhere((item) => item.id == id);
-    _repository.emitChange();
-  }
+  void delete(String id) => _repo.remove(_repo.listings, id);
 
-  Future<void> setListingPaused(String id, bool paused) async {
-    final index = _repository.listings.indexWhere((item) => item.id == id);
-    if (index < 0) return;
-    _repository.listings[index] = _repository.listings[index].copyWith(isPaused: paused);
-    _repository.emitChange();
-  }
+  void toggleSaved(String id) => _repo.update(
+    _repo.listings,
+    id,
+    (item) => item.copyWith(isSaved: !item.isSaved),
+  );
+
+  void setPaused(String id, bool paused) => _repo.update(
+    _repo.listings,
+    id,
+    (item) => item.copyWith(isPaused: paused),
+  );
 }

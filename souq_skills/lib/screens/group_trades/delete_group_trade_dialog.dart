@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:souq_skills/widgets/confirmation_dialog.dart';
 
-class DeleteGroupTradeDialog extends StatelessWidget {
-  const DeleteGroupTradeDialog({super.key});
-  @override Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Delete Group Trade'),
-    content: const Text('Confirm group trade deletion.'),
-    actions: [
-      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-      FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Confirm')),
-    ],
-  );
+abstract final class DeleteGroupTradeDialog {
+  static Future<bool> confirm(BuildContext context) =>
+      ConfirmationDialog.confirm(
+        context,
+        title: 'Delete group trade?',
+        message: 'This removes the group for all of its members.',
+        confirmLabel: 'Delete',
+        destructive: true,
+      );
 }

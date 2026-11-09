@@ -1,3 +1,56 @@
 import 'package:flutter/material.dart';
-import 'package:souq_skills/core/app_colors.dart';
-class SouqButton extends StatelessWidget { const SouqButton({required this.label, required this.onPressed, this.outlined = false, this.showArrow = false, super.key}); final String label; final VoidCallback? onPressed; final bool outlined; final bool showArrow; @override Widget build(BuildContext context) { final child = Row(mainAxisAlignment: MainAxisAlignment.center, children: [Text(label), if (showArrow) const Padding(padding: EdgeInsets.only(left: 10), child: Icon(Icons.arrow_forward, size: 18))]); return SizedBox(width: double.infinity, height: 54, child: outlined ? OutlinedButton(onPressed: onPressed, child: child) : FilledButton(style: FilledButton.styleFrom(backgroundColor: souqGreen), onPressed: onPressed, child: child)); } }
+import 'package:souq_skills/core/app_theme.dart';
+
+class SouqButton extends StatelessWidget {
+  const SouqButton({
+    required this.label,
+    required this.onPressed,
+    this.outlined = false,
+    this.destructive = false,
+    this.icon,
+    super.key,
+  });
+
+  final String label;
+  final VoidCallback? onPressed;
+  final bool outlined;
+  final bool destructive;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final danger = context.colors.error;
+    final child = Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      spacing: 8,
+      children: [
+        if (icon != null) Icon(icon, size: 20),
+        Flexible(child: Text(label, overflow: TextOverflow.ellipsis)),
+      ],
+    );
+    return SizedBox(
+      width: double.infinity,
+      child: outlined
+          ? OutlinedButton(
+              style: destructive
+                  ? OutlinedButton.styleFrom(
+                      foregroundColor: danger,
+                      side: BorderSide(color: danger),
+                    )
+                  : null,
+              onPressed: onPressed,
+              child: child,
+            )
+          : FilledButton(
+              style: destructive
+                  ? FilledButton.styleFrom(
+                      backgroundColor: danger,
+                      foregroundColor: context.colors.onError,
+                    )
+                  : null,
+              onPressed: onPressed,
+              child: child,
+            ),
+    );
+  }
+}

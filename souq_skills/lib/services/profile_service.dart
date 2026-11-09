@@ -1,12 +1,43 @@
-import '../models/app_settings.dart';
-import '../models/user.dart';
+import 'package:souq_skills/models/app_settings.dart';
+import 'package:souq_skills/models/user.dart';
+
 import 'repository.dart';
 
 class ProfileService {
-  ProfileService({Repository? repository}) : _repository = repository ?? Repository.instance;
-  final Repository _repository;
-  Future<User> getProfile() async => _repository.currentUser;
-  Future<User> updateProfile(User profile) async { _repository.updateUser(profile); return profile; }
-  Future<AppSettings> getSettings() async => _repository.settings;
-  Future<AppSettings> updateSettings(AppSettings settings) async { _repository.updateSettings(settings); return settings; }
+  final Repository _repo = Repository.instance;
+
+  User get currentUser => _repo.currentUser;
+  AppSettings get settings => _repo.settings;
+
+  void updateProfile(User user) => _repo.updateUser(user);
+
+  void updateSettings(AppSettings Function(AppSettings current) change) =>
+      _repo.updateSettings(change(_repo.settings));
+
+  void addOfferedSkill(String skill) => _updateUser(
+    (user) => user.copyWith(skillsOffered: _added(user.skillsOffered, skill)),
+  );
+
+  void removeOfferedSkill(String skill) => _updateUser(
+    (user) => user.copyWith(skillsOffered: _removed(user.skillsOffered, skill)),
+  );
+
+  void addWantedSkill(String skill) => _updateUser(
+    (user) => user.copyWith(skillsWanted: _added(user.skillsWanted, skill)),
+  );
+
+  void removeWantedSkill(String skill) => _updateUser(
+    (user) => user.copyWith(skillsWanted: _removed(user.skillsWanted, skill)),
+  );
+
+  void setCity(String city) => _updateUser((user) => user.copyWith(city: city));
+
+  void _updateUser(User Function(User current) change) =>
+      _repo.updateUser(change(_repo.currentUser));
+
+  List<String> _added(List<String> skills, String skill) =>
+      {...skills, skill.trim()}.toList();
+
+  List<String> _removed(List<String> skills, String skill) =>
+      skills.where((item) => item != skill).toList();
 }

@@ -1,30 +1,44 @@
-enum NotificationType { message, trade, groupTrade, review, searchAlert, system }
+import 'identifiable.dart';
 
-class AppNotification {
+enum NotificationType {
+  message,
+  trade,
+  groupTrade,
+  review,
+  searchAlert,
+  system,
+}
+
+class AppNotification implements Identifiable {
   const AppNotification({
+    required this.id,
     required this.title,
     required this.message,
-    this.id = '',
+    required this.createdAt,
     this.type = NotificationType.system,
     this.isRead = false,
-    this.createdAt,
     this.route,
+    this.routeArgument,
   });
 
+  @override
   final String id;
   final String title;
   final String message;
+  final DateTime createdAt;
   final NotificationType type;
   final bool isRead;
-  final DateTime? createdAt;
   final String? route;
+  final String? routeArgument;
 
-  AppNotification copyWith({
-    String? id, String? title, String? message, NotificationType? type,
-    bool? isRead, DateTime? createdAt, String? route,
-  }) => AppNotification(
-    id: id ?? this.id, title: title ?? this.title, message: message ?? this.message,
-    type: type ?? this.type, isRead: isRead ?? this.isRead,
-    createdAt: createdAt ?? this.createdAt, route: route ?? this.route,
+  AppNotification markedRead() => AppNotification(
+    id: id,
+    title: title,
+    message: message,
+    createdAt: createdAt,
+    type: type,
+    isRead: true,
+    route: route,
+    routeArgument: routeArgument,
   );
 }

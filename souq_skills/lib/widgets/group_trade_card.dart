@@ -1,3 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:souq_skills/core/app_routes.dart';
+import 'package:souq_skills/core/navigation.dart';
 import 'package:souq_skills/models/group_trade.dart';
-class GroupTradeCard extends StatelessWidget { const GroupTradeCard({required this.trade, required this.onTap, super.key}); final GroupTrade trade; final VoidCallback onTap; @override Widget build(BuildContext context) => Card(child: ListTile(onTap: onTap, leading: const Icon(Icons.groups_outlined), title: Text(trade.title), subtitle: Text('${trade.memberIds.length} members'), trailing: Text(trade.status.name))); }
+
+import 'status_chip.dart';
+
+class GroupTradeCard extends StatelessWidget {
+  const GroupTradeCard({required this.group, super.key});
+
+  final GroupTrade group;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    child: ListTile(
+      onTap: () => context.open(AppRoutes.groupTradeDetails, args: group.id),
+      leading: const Icon(Icons.groups_outlined),
+      title: Text(group.title),
+      subtitle: Text('${group.memberIds.length} members'),
+      trailing: StatusChip.group(group.status),
+    ),
+  );
+}

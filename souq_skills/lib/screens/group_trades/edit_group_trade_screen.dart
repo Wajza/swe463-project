@@ -1,12 +1,33 @@
 import 'package:flutter/material.dart';
-import 'package:souq_skills/screens/shared/screen_shell.dart';
+import 'package:souq_skills/core/feedback.dart';
+import 'package:souq_skills/core/navigation.dart';
+import 'package:souq_skills/screens/utility/not_found_screen.dart';
+import 'package:souq_skills/services/group_trade_service.dart';
+import 'package:souq_skills/widgets/app_page.dart';
+import 'package:souq_skills/widgets/group_trade_form.dart';
 
 class EditGroupTradeScreen extends StatelessWidget {
-  const EditGroupTradeScreen({super.key});
-  @override Widget build(BuildContext context) => ScreenShell(
-    title: 'Edit Group Trade',
-    description: 'Edit your group exchange.',
-    icon: Icons.auto_awesome,
-    actions: [ScreenAction(label: 'Continue', onPressed: () => Navigator.maybePop(context))],
-  );
+  const EditGroupTradeScreen({required this.groupId, super.key});
+
+  final String groupId;
+
+  @override
+  Widget build(BuildContext context) {
+    final group = GroupTradeService().byId(groupId);
+    if (group == null) return const NotFoundScreen();
+    return AppPage(
+      title: 'Edit group trade',
+      children: [
+        GroupTradeForm(
+          initial: group,
+          submitLabel: 'Save changes',
+          onSubmit: (updated) {
+            GroupTradeService().update(updated);
+            context.back();
+            context.showMessage('Group trade updated');
+          },
+        ),
+      ],
+    );
+  }
 }

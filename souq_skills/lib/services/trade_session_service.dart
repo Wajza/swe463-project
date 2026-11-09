@@ -1,15 +1,52 @@
-import '../models/trade_session.dart';
+import 'package:souq_skills/models/trade_session.dart';
+
+import 'chat_service.dart';
 import 'repository.dart';
+import 'trade_service.dart';
 
 class TradeSessionService {
-  TradeSessionService({Repository? repository}) : _repository = repository ?? Repository.instance;
-  final Repository _repository;
-  Future<List<TradeSession>> getSessions(String tradeId) async => _repository.sessions.where((item) => item.tradeId == tradeId).toList();
-  Future<TradeSession> schedule(TradeSession session) async { _repository.sessions.add(session); _repository.emitChange(); return session; }
-  Future<void> complete(TradeSession session) async {
-    final index = _repository.sessions.indexWhere((item) => item.id == session.id);
-    if (index < 0) return;
-    _repository.sessions[index] = session.copyWith(isCompleted: true);
-    _repository.emitChange();
+  final Repository _repo = Repository.instance;
+
+  TradeSession? byId(String? id) => _repo.find(_repo.sessions, id);
+
+  /// Books the trade's session, or reschedules the existing one.
+  void schedule({
+    required String tradeId,
+    required DateTime scheduledAt,
+    required String method,
+    required String locationOrLink,
+    required String notes,
+  }) {
+    final trade = TradeService().byId(tradeId);
+    if (trade == null) return;
+    final existingId = trade.sessionId;
+    if (existingId != null) {
+      _repo.update(
+        _repo.sessions,
+        existingId,
+        (session) => session.copyWith(
+          scheduledAt: scheduledAt,
+          method: method,
+          locationOrLink: locationOrLink,
+          notes: notes,
+        ),
+      );
+    } else {
+      final session = TradeSession(
+        id: _repo.nextId('s'),
+        tradeId: tradeId,
+        scheduledAt: scheduledAt,
+        method: method,
+        locationOrLink: locationOrLink,
+        notes: notes,
+      );
+      _repo.insert(_repo.sessions, session);
+      _repo.update(
+        _repo.trades,
+        tradeId,
+        (current) => current.copyWith(sessionId: session.id),
+      );
+    }
+    ChatService().postSystem(trade.otherMemberId, 'Session scheduled.');
   }
 }

@@ -1,2 +1,0 @@
-import 'package:flutter/material.dart';
-class LoadingState extends StatelessWidget { const LoadingState({this.message = 'Loading...', this.compact = false, super.key}); final String message; final bool compact; @override Widget build(BuildContext context) => Center(child: compact ? const CircularProgressIndicator() : Column(mainAxisSize: MainAxisSize.min, children: [const CircularProgressIndicator(), Text(message)])); }

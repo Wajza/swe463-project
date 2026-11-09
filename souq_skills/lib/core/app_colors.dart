@@ -6,3 +6,4 @@ const souqCream = Color(0xFFF8FAF5);
 const souqMint = Color(0xFF9AF0C5);
 const souqLavender = Color(0xFF6650B5);
 const souqGold = Color(0xFFE5A83B);
+const souqDanger = Color(0xFFC0392B);

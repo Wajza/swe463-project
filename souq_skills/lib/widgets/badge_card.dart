@@ -1,3 +1,30 @@
 import 'package:flutter/material.dart';
-import 'package:souq_skills/models/badge.dart' as models;
-class BadgeCard extends StatelessWidget { const BadgeCard({required this.badge, this.onTap, super.key}); final models.Badge badge; final VoidCallback? onTap; @override Widget build(BuildContext context) => Card(child: ListTile(onTap: onTap, leading: Icon(badge.isEarned ? Icons.emoji_events : Icons.lock_outline), title: Text(badge.title), subtitle: Text(badge.description), trailing: Text('${badge.progress}/${badge.target}'))); }
+import 'package:souq_skills/core/app_routes.dart';
+import 'package:souq_skills/core/navigation.dart';
+import 'package:souq_skills/models/achievement_badge.dart';
+
+import 'badge_medal.dart';
+
+class BadgeCard extends StatelessWidget {
+  const BadgeCard({required this.badge, super.key});
+
+  final AchievementBadge badge;
+
+  @override
+  Widget build(BuildContext context) => Card(
+    child: ListTile(
+      onTap: () => context.open(AppRoutes.badgeDetails, args: badge.id),
+      leading: BadgeMedal(badge: badge, radius: 24),
+      title: Text(badge.title),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(badge.requirement),
+          const SizedBox(height: 6),
+          LinearProgressIndicator(value: badge.completion, minHeight: 5),
+        ],
+      ),
+      trailing: Text('${badge.cappedProgress}/${badge.target}'),
+    ),
+  );
+}

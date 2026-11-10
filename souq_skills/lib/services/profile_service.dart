@@ -37,24 +37,28 @@ class ProfileService {
   void updateSettings(AppSettings Function(AppSettings current) change) =>
       _repo.updateSettings(change(_repo.settings));
 
-  void addOfferedSkill(String skill) => _updateUser(
+  // Each skill change is saved like any profile edit: online first, and
+  // only then on this device. They throw a [ProfileException] on failure.
+
+  Future<void> addOfferedSkill(String skill) => _saveChange(
     (user) => user.copyWith(skillsOffered: _added(user.skillsOffered, skill)),
   );
 
-  void removeOfferedSkill(String skill) => _updateUser(
+  Future<void> removeOfferedSkill(String skill) => _saveChange(
     (user) => user.copyWith(skillsOffered: _removed(user.skillsOffered, skill)),
   );
 
-  void addWantedSkill(String skill) => _updateUser(
+  Future<void> addWantedSkill(String skill) => _saveChange(
     (user) => user.copyWith(skillsWanted: _added(user.skillsWanted, skill)),
   );
 
-  void removeWantedSkill(String skill) => _updateUser(
+  Future<void> removeWantedSkill(String skill) => _saveChange(
     (user) => user.copyWith(skillsWanted: _removed(user.skillsWanted, skill)),
   );
 
-  void _updateUser(User Function(User current) change) =>
-      _repo.updateUser(change(_repo.currentUser));
+  /// Applies [change] to the latest profile, so other fields are kept.
+  Future<void> _saveChange(User Function(User current) change) =>
+      saveProfile(change(_repo.currentUser));
 
   List<String> _added(List<String> skills, String skill) =>
       {...skills, skill.trim()}.toList();

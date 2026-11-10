@@ -5,6 +5,7 @@ import 'package:souq_skills/core/feedback.dart';
 import 'package:souq_skills/core/navigation.dart';
 import 'package:souq_skills/core/validators.dart';
 import 'package:souq_skills/models/otp_request.dart';
+import 'package:souq_skills/services/auth_service.dart';
 import 'package:souq_skills/services/profile_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
 import 'package:souq_skills/widgets/app_text_field.dart';
@@ -49,6 +50,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   /// A new phone number only counts once its code has been verified.
   Future<bool> _verifyPhoneIfChanged(String phone) async {
     if (phone == _user.phone) return true;
+    try {
+      await AuthService().sendCode(phone);
+    } on AuthException catch (error) {
+      if (mounted) context.showMessage(error.message);
+      return false;
+    }
+    if (!mounted) return false;
     final verified = await context.open(
       AppRoutes.otpVerification,
       args: OtpRequest(phone: phone, purpose: OtpPurpose.changePhone),

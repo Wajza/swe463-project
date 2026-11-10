@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:souq_skills/core/app_options.dart';
 import 'package:souq_skills/core/app_routes.dart';
+import 'package:souq_skills/core/feedback.dart';
 import 'package:souq_skills/core/navigation.dart';
 import 'package:souq_skills/core/validators.dart';
 import 'package:souq_skills/services/auth_service.dart';
@@ -29,6 +30,7 @@ class _CreateAccountProfileScreenState
   final _username = TextEditingController();
   String _city = AppOptions.defaultCity;
   bool _keepLocationPrivate = false;
+  bool _saving = false;
 
   @override
   void dispose() {
@@ -38,24 +40,34 @@ class _CreateAccountProfileScreenState
     super.dispose();
   }
 
-  void _submit() {
+  Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-    AuthService().createAccount(
-      firstName: _firstName.text.trim(),
-      lastName: _lastName.text.trim(),
-      username: _username.text.trim(),
-      phone: widget.phone,
-      city: _city,
-      keepLocationPrivate: _keepLocationPrivate,
-    );
-    context.resetTo(AppRoutes.home);
+    setState(() => _saving = true);
+    try {
+      await AuthService().completeSignUp(
+        firstName: _firstName.text.trim(),
+        lastName: _lastName.text.trim(),
+        username: _username.text.trim(),
+        phone: widget.phone,
+        city: _city,
+        keepLocationPrivate: _keepLocationPrivate,
+      );
+      if (mounted) context.resetTo(AppRoutes.home);
+    } on AuthException catch (error) {
+      if (mounted) context.showMessage(error.message);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) => AppPage(
     title: 'About you',
     showBackButton: false,
-    action: SouqButton(label: 'Create account', onPressed: _submit),
+    action: SouqButton(
+      label: _saving ? 'Creating account…' : 'Create account',
+      onPressed: _saving ? null : _submit,
+    ),
     children: [
       Form(
         key: _formKey,

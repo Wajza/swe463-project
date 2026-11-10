@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:souq_skills/core/app_routes.dart';
+import 'package:souq_skills/core/feedback.dart';
 import 'package:souq_skills/core/navigation.dart';
 import 'package:souq_skills/models/app_settings.dart';
 import 'package:souq_skills/services/auth_service.dart';
@@ -44,8 +45,13 @@ class SettingsScreen extends StatelessWidget {
       destructive: true,
     );
     if (!confirmed || !context.mounted) return;
-    AuthService().deleteAccount();
-    context.resetTo(AppRoutes.welcome);
+    try {
+      await AuthService().deleteAccount();
+    } on AuthException catch (error) {
+      if (context.mounted) context.showMessage(error.message);
+      return;
+    }
+    if (context.mounted) context.resetTo(AppRoutes.welcome);
   }
 
   @override

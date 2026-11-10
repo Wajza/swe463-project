@@ -9,7 +9,7 @@ import 'package:souq_skills/widgets/status_page.dart';
 
 import 'onboarding_screen.dart';
 
-/// Loads the saved data, then opens the app or the welcome screen.
+/// Loads the saved data and sign-in, then opens the app or the welcome screen.
 class AppGate extends StatefulWidget {
   const AppGate({super.key});
 
@@ -29,7 +29,10 @@ class _AppGateState extends State<AppGate> {
 
   void _startRestoring() {
     if (_repository.isRestored) return;
-    _restoring = _repository.restore().then((_) {
+    _restoring = Future.wait([
+      _repository.restore(),
+      AuthService().restoreSession(),
+    ]).then((_) {
       MemberSimulator().resumePendingProposals();
     });
   }

@@ -1,5 +1,7 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:souq_skills/data/auth_repository.dart';
+import 'package:souq_skills/data/device_account_store.dart';
+import 'package:souq_skills/data/profile_repository.dart';
 import 'package:souq_skills/models/user.dart';
 
 import 'repository.dart';
@@ -18,6 +20,25 @@ class AuthService {
       ? DemoAuthRepository(isKnownPhone: AuthService().isKnownPhone)
       : FirebaseAuthRepository();
   static set repository(AuthRepository value) => _auth = value;
+
+  static ProfileRepository? _profiles;
+
+  /// Where profiles are stored online: Firestore once Firebase has been
+  /// initialized. Null in the offline demo, which keeps the profile on this
+  /// device only. Can be replaced, e.g. with a fake.
+  static ProfileRepository? get profiles =>
+      _profiles ??
+      (Firebase.apps.isEmpty ? null : _profiles = FirebaseProfileRepository());
+  static set profiles(ProfileRepository? value) => _profiles = value;
+
+  static DeviceAccountStore? _deviceAccount;
+
+  /// Which account the data saved on this device belongs to.
+  static DeviceAccountStore get deviceAccount => _deviceAccount ??=
+      Firebase.apps.isEmpty
+      ? MemoryDeviceAccountStore()
+      : PrefsDeviceAccountStore();
+  static set deviceAccount(DeviceAccountStore? value) => _deviceAccount = value;
 
   /// Signed in on this device and with the sign-in service.
   bool get isSignedIn => _repo.isSignedIn && repository.uid != null;
@@ -38,13 +59,98 @@ class AuthService {
       repository.sendCode(_international(phone));
 
   /// Signs in with [code] and returns whether the account already has a
-  /// profile. If it does, the member is signed in on this device too;
-  /// otherwise they still need to create one. Throws an [AuthException].
+  /// profile. If it does, it is loaded and the member is signed in on this
+  /// device too; otherwise they still need to create one.
+  ///
+  /// Throws an [AuthException]. If the profile cannot be loaded, the member
+  /// is signed out again and the data on this device is left untouched.
   Future<bool> verifyCode(String code) async {
     await repository.verifyCode(code);
-    final hasProfile = await repository.hasProfile();
-    if (hasProfile) signIn();
-    return hasProfile;
+    final profiles = AuthService.profiles;
+    if (profiles == null) {
+      // Offline demo: the profile is the one kept on this device.
+      final hasProfile = await repository.hasProfile();
+      if (hasProfile) signIn();
+      return hasProfile;
+    }
+
+    final uid = repository.uid;
+    if (uid == null) {
+      throw const AuthException('Your session has expired. Sign in again.');
+    }
+    final User? profile;
+    try {
+      profile = await profiles.fetchProfile(uid);
+    } on ProfileException catch (error) {
+      // Never continue half signed in, or with another account's data.
+      await _signOutQuietly();
+      throw AuthException(error.message);
+    }
+    if (profile == null) return false;
+    await _openAccount(uid, profile);
+    signIn();
+    return true;
+  }
+
+  /// When the app opens signed in, loads that account's profile before Home
+  /// is shown. Signs out on this device if the account has no profile.
+  ///
+  /// Throws a [ProfileException] if the profile cannot be loaded, unless the
+  /// data on this device already belongs to that account.
+  Future<void> loadSessionProfile() async {
+    final profiles = AuthService.profiles;
+    final uid = repository.uid;
+    if (profiles == null || uid == null || !_repo.isSignedIn) return;
+    final User? profile;
+    try {
+      profile = await profiles.fetchProfile(uid);
+    } on ProfileException {
+      // Offline, the member can still open their own saved copy.
+      if (await _deviceOwner() == uid) return;
+      rethrow;
+    }
+    if (profile == null) {
+      _setSignedIn(false);
+      return;
+    }
+    await _openAccount(uid, profile);
+  }
+
+  /// Shows [profile] as the current member. Data saved on this device for
+  /// another account (or for nobody known) is replaced by a fresh start.
+  Future<void> _openAccount(String uid, User profile) async {
+    if (await _deviceOwner() == uid) {
+      _repo.updateUser(profile);
+      return;
+    }
+    _repo.load(SeedData.newMember(profile));
+    _repo.hasAccount = true;
+    await _rememberDeviceOwner(uid);
+  }
+
+  /// An unreadable owner counts as unknown, which only ever starts fresh.
+  Future<String?> _deviceOwner() async {
+    try {
+      return await deviceAccount.read();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// If this fails, the next sign-in starts fresh again: data is never
+  /// shown to the wrong account.
+  Future<void> _rememberDeviceOwner(String? uid) async {
+    try {
+      await deviceAccount.write(uid);
+    } catch (_) {}
+  }
+
+  Future<void> _signOutQuietly() async {
+    try {
+      await repository.signOut();
+    } on AuthException {
+      // Already failing; the original problem is the one to report.
+    }
   }
 
   /// Confirms the new number passed to [sendCode] with [code].
@@ -77,6 +183,7 @@ class AuthService {
       city: city,
       keepLocationPrivate: keepLocationPrivate,
     );
+    await _rememberDeviceOwner(repository.uid);
   }
 
   /// Sets up a new account on this device only.
@@ -120,6 +227,7 @@ class AuthService {
     await repository.deleteAccount();
     _repo.hasAccount = false;
     _setSignedIn(false);
+    await _rememberDeviceOwner(null);
   }
 
   User _newUser({

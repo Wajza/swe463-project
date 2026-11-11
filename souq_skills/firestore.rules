@@ -36,6 +36,11 @@ rules_version = '2';
 // trades/{tradeId}     One-to-one trades between two real members, and
 // proposals/{proposalId}  their proposals and counteroffers. Only the two
 //                      members can read them; see the trade rules below.
+// wallets/{uid}        Each member's credits, and their append-only ledger
+// wallets/{uid}/transactions/{entryId}  of why they changed. Only the
+//                      member can read them; balances only change through
+//                      the welcome credits or a trade completing. See the
+//                      wallet rules below.
 //
 // Anything not matched below is denied.
 //
@@ -624,8 +629,9 @@ service cloud.firestore {
     //             completed in the same write once both members confirmed
     //   dispute   accepted -> disputed (either member)
     // Sending, countering, accepting and scheduling need both accounts and
-    // no block either way (canMessage); ending a trade does not. Credits
-    // are not moved here: creditsOffered only records the terms.
+    // no block either way (canMessage); ending a trade does not. The
+    // credits in the terms (creditsOffered) and the completion rewards are
+    // paid in the write that completes the trade; see the wallet rules.
 
     function tradePath(tradeId) {
       return /databases/$(database)/documents/trades/$(tradeId);
@@ -793,8 +799,11 @@ service cloud.firestore {
     }
 
     // The caller confirms once, after a session was booked. Completed
-    // exactly when both members have confirmed.
-    function isTradeConfirmation(before, data, changed) {
+    // exactly when both members have confirmed, and then settled in the
+    // same write: both wallets are paid for this trade (see the wallet
+    // rules below), so a trade cannot complete without its payment and
+    // rewards, and they cannot happen without the trade completing.
+    function isTradeConfirmation(tradeId, before, data, changed) {
       let ids = before.participantIds;
       let done = data.completedBy;
       return before.status == 'accepted'
@@ -804,7 +813,9 @@ service cloud.firestore {
         && !(request.auth.uid in before.completedBy)
         && done.diff(before.completedBy).affectedKeys().hasOnly([request.auth.uid])
         && done[request.auth.uid] == request.time
-        && ((done.keys().hasAll(ids) && data.status == 'completed')
+        && ((done.keys().hasAll(ids) && data.status == 'completed'
+              && settlesWallet(ids[0], tradeId)
+              && settlesWallet(ids[1], tradeId))
             || (!done.keys().hasAll(ids) && data.status == 'accepted'));
     }
 
@@ -814,7 +825,7 @@ service cloud.firestore {
         && changed.hasOnly(['status', 'updatedAt', 'updatedBy']);
     }
 
-    function isValidTradeUpdate() {
+    function isValidTradeUpdate(tradeId) {
       let before = resource.data;
       let data = request.resource.data;
       let changed = data.diff(before).affectedKeys();
@@ -825,7 +836,7 @@ service cloud.firestore {
         && (isTradeCounter(before, data, changed)
             || isTradeAnswer(before, data, changed)
             || isTradeSchedule(before, data, changed)
-            || isTradeConfirmation(before, data, changed)
+            || isTradeConfirmation(tradeId, before, data, changed)
             || isTradeDispute(before, data, changed));
     }
 
@@ -838,7 +849,7 @@ service cloud.firestore {
 
       allow update: if signedIn()
         && request.auth.uid in resource.data.participantIds
-        && isValidTradeUpdate();
+        && isValidTradeUpdate(tradeId);
 
       allow delete: if false;
     }
@@ -855,6 +866,164 @@ service cloud.firestore {
         && isValidProposalUpdate(proposalId);
 
       allow delete: if false;
+    }
+
+    // Wallets, as written by lib/data/wallet_repository.dart and, when a
+    // trade completes, by FirebaseTradeRepository.confirmCompletion.
+    //
+    // wallets/{uid}  { uid, balance, lastTradeId?, updatedAt }
+    //   The member's credits. Only they can read it. No one can set a
+    //   balance: it is opened once with the welcome credits, and after that
+    //   it only changes by exactly what a trade completing in the same
+    //   write pays this member. Never deleted, so never opened twice.
+    //
+    // wallets/{uid}/transactions/{entryId}  The member's ledger:
+    //   { kind, amount, tradeId?, counterpartyId?, createdAt }
+    //   Append-only: created in the same write as the change it explains,
+    //   never changed or deleted. The id names the reason, so each happens
+    //   at most once:
+    //     welcome            'welcome', +welcomeCredits(), when opened
+    //     {tradeId}_reward   'tradeReward', +completionReward(), to both
+    //     {tradeId}_payment  'tradePayment' (the payer, -credits) or
+    //                        'tradeIncome' (the other member, +credits),
+    //                        only for a trade with credits
+    //
+    // A trade's credits are paid by the member whose terms offered them
+    // (termsBy) to the other member; both accepted those terms and both
+    // confirmed the exchange. The completing write is made by whoever
+    // confirms last, so it changes the other member's wallet too, but only
+    // by what these rules work out from the trade: never to anyone outside
+    // it, never twice, never below zero.
+
+    function walletPath(uid) {
+      return /databases/$(database)/documents/wallets/$(uid);
+    }
+
+    function walletEntryPath(uid, entryId) {
+      return /databases/$(database)/documents/wallets/$(uid)/transactions/$(entryId);
+    }
+
+    // Kept in step with WalletDocument in lib/data/wallet_repository.dart.
+    function welcomeCredits() {
+      return 120;
+    }
+
+    function completionReward() {
+      return 10;
+    }
+
+    // Trade [tradeId] goes from accepted to completed in this very write,
+    // which can happen only once for each trade.
+    function completesNow(tradeId) {
+      return isSafeId(tradeId)
+        && get(tradePath(tradeId)).data.status == 'accepted'
+        && getAfter(tradePath(tradeId)).data.status == 'completed';
+    }
+
+    // The credits [uid] receives (+) or pays (-) for [trade], besides the
+    // reward.
+    function paymentOf(uid, trade) {
+      return trade.termsBy == uid ? -trade.creditsOffered : trade.creditsOffered;
+    }
+
+    // After this write, [uid]'s wallet has been paid for [tradeId]; the
+    // wallet rules check by how much.
+    function settlesWallet(uid, tradeId) {
+      return getAfter(walletPath(uid)).data.get('lastTradeId', '') == tradeId;
+    }
+
+    // Opened once by the owner, with the welcome credits and their entry.
+    function isNewWallet(uid) {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['uid', 'balance', 'updatedAt'])
+        && data.keys().hasAll(['uid', 'balance', 'updatedAt'])
+        && data.uid == uid
+        && data.balance is int
+        && data.balance == welcomeCredits()
+        && data.updatedAt == request.time
+        && existsAfter(walletEntryPath(uid, 'welcome'));
+    }
+
+    // Paid for one trade of [uid]'s completing in this write: the reward,
+    // plus or minus its credits, with the ledger entries for both.
+    function isWalletSettlement(uid) {
+      let before = resource.data;
+      let data = request.resource.data;
+      let tradeId = data.get('lastTradeId', '');
+      let trade = getAfter(tradePath(tradeId)).data;
+      return data.keys().hasOnly(['uid', 'balance', 'lastTradeId', 'updatedAt'])
+        && data.diff(before).affectedKeys()
+             .hasOnly(['balance', 'lastTradeId', 'updatedAt'])
+        && data.updatedAt == request.time
+        && tradeId != before.get('lastTradeId', '')
+        && completesNow(tradeId)
+        && request.auth.uid in trade.participantIds
+        && uid in trade.participantIds
+        && before.balance is int
+        && data.balance is int
+        && data.balance == before.balance + completionReward() + paymentOf(uid, trade)
+        && data.balance >= 0
+        && existsAfter(walletEntryPath(uid, tradeId + '_reward'))
+        && (trade.creditsOffered == 0
+            || existsAfter(walletEntryPath(uid, tradeId + '_payment')));
+    }
+
+    function isWelcomeEntry(uid, data) {
+      return isOwner(uid)
+        && data.keys().hasOnly(['kind', 'amount', 'createdAt'])
+        && data.kind == 'welcome'
+        && data.amount == welcomeCredits()
+        && !exists(walletPath(uid))
+        && getAfter(walletPath(uid)).data.balance == welcomeCredits();
+    }
+
+    function isTradeEntry(uid, entryId, data) {
+      let tradeId = data.tradeId;
+      let trade = getAfter(tradePath(tradeId)).data;
+      let ids = trade.participantIds;
+      return data.keys().hasOnly(['kind', 'amount', 'tradeId', 'counterpartyId',
+                                  'createdAt'])
+        && data.keys().hasAll(['kind', 'amount', 'tradeId', 'counterpartyId',
+                               'createdAt'])
+        && completesNow(tradeId)
+        && request.auth.uid in ids
+        && uid in ids
+        && data.counterpartyId == (ids[0] == uid ? ids[1] : ids[0])
+        && settlesWallet(uid, tradeId)
+        && ((entryId == tradeId + '_reward'
+              && data.kind == 'tradeReward'
+              && data.amount == completionReward())
+            || (entryId == tradeId + '_payment'
+              && trade.creditsOffered > 0
+              && data.amount == paymentOf(uid, trade)
+              && data.kind == (trade.termsBy == uid ? 'tradePayment' : 'tradeIncome')));
+    }
+
+    function isValidWalletEntry(uid, entryId) {
+      let data = request.resource.data;
+      return data.createdAt == request.time
+        && data.amount is int
+        && (entryId == 'welcome'
+            ? isWelcomeEntry(uid, data)
+            : isTradeEntry(uid, entryId, data));
+    }
+
+    match /wallets/{uid} {
+      allow get: if isOwner(uid);
+      allow list: if false;
+
+      allow create: if isOwner(uid) && isNewWallet(uid);
+
+      // Never by the member choosing a balance: only a trade's settlement.
+      allow update: if signedIn() && isWalletSettlement(uid);
+
+      allow delete: if false;
+
+      match /transactions/{entryId} {
+        allow get, list: if isOwner(uid);
+        allow create: if signedIn() && isValidWalletEntry(uid, entryId);
+        allow update, delete: if false;
+      }
     }
   }
 }

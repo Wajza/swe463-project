@@ -1,5 +1,5 @@
 // Firestore security rules tests for Souq Skills profiles, usernames,
-// listings, blocks, reports, reviews, chats and trades.
+// listings, blocks, reports, reviews, chats, trades and wallets.
 //
 // Run from souq_skills/ (starts and stops the emulator, deploys nothing):
 //   firebase emulators:exec --only firestore --project demo-souq-skills \
@@ -27,6 +27,7 @@ import {
   documentId,
   getDoc,
   getDocs,
+  increment,
   limit,
   orderBy,
   query,
@@ -2376,21 +2377,88 @@ const schedule = (db, uid, tradeId, scheduledAt = TOMORROW()) =>
     updatedBy: uid,
   });
 
-/// Mirrors confirmCompletion: decided in a transaction from what is stored.
-/// [status] forces the stored status, for what must be refused.
-const confirm = (db, uid, tradeId, { status } = {}) =>
-  runTransaction(db, async (transaction) => {
+/// Mirrors confirmCompletion: the caller's wallet is opened, then the
+/// confirmation is decided in a transaction from what is stored, and the
+/// completing one pays both wallets (see settlementOf below). [status]
+/// forces the stored status and [tamper] changes the wallet writes, for
+/// what must be refused.
+const confirm = async (db, uid, tradeId, { status, tamper = (members) => members } = {}) => {
+  await openWallet(db, uid);
+  return runTransaction(db, async (transaction) => {
     const ref = doc(db, 'trades', tradeId);
     const trade = (await transaction.get(ref)).data();
     const completedBy = { ...trade.completedBy, [uid]: serverTimestamp() };
     const done = trade.participantIds.every((id) => id in completedBy);
+    if (done) await transaction.get(walletRef(db, uid));
     transaction.update(ref, {
       completedBy,
       ...(status ? { status } : done ? { status: 'completed' } : {}),
       updatedAt: serverTimestamp(),
       updatedBy: uid,
     });
+    if (done) applySettlement(transaction, db, tradeId, tamper(settlementOf(tradeId, trade)));
   });
+};
+
+// Wallets: wallets/{uid} and wallets/{uid}/transactions/{entryId}
+
+const WELCOME = 120;
+const REWARD = 10;
+
+const walletRef = (db, uid) => doc(db, 'wallets', uid);
+const entryRef = (db, uid, id) => doc(db, 'wallets', uid, 'transactions', id);
+
+/// Mirrors FirebaseWalletRepository.openWallet.
+const openWallet = (db, uid) =>
+  runTransaction(db, async (transaction) => {
+    if ((await transaction.get(walletRef(db, uid))).exists()) return;
+    transaction.set(walletRef(db, uid), { uid, balance: WELCOME, updatedAt: serverTimestamp() });
+    transaction.set(entryRef(db, uid, 'welcome'), {
+      kind: 'welcome',
+      amount: WELCOME,
+      createdAt: serverTimestamp(),
+    });
+  });
+
+const paymentOf = (uid, trade) => (trade.termsBy === uid ? -trade.creditsOffered : trade.creditsOffered);
+
+/// Mirrors WalletDocument.settle: for each member, the change to their
+/// balance and the ledger entries for it.
+function settlementOf(tradeId, trade) {
+  return trade.participantIds.map((uid) => {
+    const counterpartyId = trade.participantIds.find((id) => id !== uid);
+    const entries = {
+      [`${tradeId}_reward`]: { kind: 'tradeReward', amount: REWARD, tradeId, counterpartyId, createdAt: serverTimestamp() },
+    };
+    if (trade.creditsOffered > 0) {
+      entries[`${tradeId}_payment`] = {
+        kind: trade.termsBy === uid ? 'tradePayment' : 'tradeIncome',
+        amount: paymentOf(uid, trade),
+        tradeId,
+        counterpartyId,
+        createdAt: serverTimestamp(),
+      };
+    }
+    return { uid, delta: REWARD + paymentOf(uid, trade), entries };
+  });
+}
+
+/// Mirrors FirebaseWalletRepository.applySettlement. A member with
+/// `skipWallet` has only their entries written.
+function applySettlement(transaction, db, tradeId, members) {
+  for (const member of members) {
+    if (!member.skipWallet) {
+      transaction.update(walletRef(db, member.uid), {
+        balance: increment(member.delta),
+        lastTradeId: tradeId,
+        updatedAt: serverTimestamp(),
+      });
+    }
+    for (const [id, data] of Object.entries(member.entries)) {
+      transaction.set(entryRef(db, member.uid, id), data);
+    }
+  }
+}
 
 async function fetchTradeIds(db, uid) {
   const snapshot = await getDocs(
@@ -2563,5 +2631,323 @@ describe('trades: what the rules must refuse', () => {
     await assertFails(updateDoc(tradeRef, { status: 'pending', updatedAt: serverTimestamp(), updatedBy: ME }));
     await assertFails(deleteDoc(tradeRef));
     await assertFails(deleteDoc(doc(dbAs(ME), 'proposals', sent.proposalId)));
+  });
+});
+
+/// A trade where [payer] offers [credits] (instead of a skill) to [payee],
+/// accepted with a session booked, and both wallets open.
+async function creditTrade(payer, payee, credits) {
+  await seedAccounts(ME, OTHER, THIRD);
+  const paid = { offeredSkill: '', creditsOffered: credits };
+  const sent = await sendProposal(dbAs(payer), payer, payee, { trade: paid, proposal: paid });
+  await respond(dbAs(payee), payee, sent, 'accepted');
+  await schedule(dbAs(payer), payer, sent.tradeId);
+  await openWallet(dbAs(ME), ME);
+  await openWallet(dbAs(OTHER), OTHER);
+  return sent;
+}
+
+const balanceOf = async (uid) => (await read(`wallets/${uid}`))?.balance;
+
+async function ledgerOf(uid) {
+  let entries;
+  await env.withSecurityRulesDisabled(async (context) => {
+    const snapshot = await getDocs(collection(context.firestore(), 'wallets', uid, 'transactions'));
+    entries = Object.fromEntries(snapshot.docs.map((item) => [item.id, item.data()]));
+  });
+  return entries;
+}
+
+/// Changes only [uid]'s settlement with [change], in a copy of [members].
+const changeMember = (uid, change) => (members) =>
+  members.map((member) => (member.uid === uid ? change(member) : member));
+
+/// Changes only [uid]'s entry [id] with [change].
+const changeEntry = (uid, id, change) =>
+  changeMember(uid, (member) => ({ ...member, entries: { ...member.entries, [id]: change(member.entries[id]) } }));
+
+describe('wallets: what the rules must allow', () => {
+  test('a member opens their wallet once, with the welcome credits', async () => {
+    await seedAccounts(ME, OTHER);
+    await assertSucceeds(openWallet(dbAs(ME), ME));
+    await assertSucceeds(openWallet(dbAs(ME), ME));
+    assert.equal(await balanceOf(ME), WELCOME);
+    assert.deepEqual(Object.keys(await ledgerOf(ME)), ['welcome']);
+
+    await assertSucceeds(getDoc(walletRef(dbAs(ME), ME)));
+    await assertSucceeds(getDocs(collection(dbAs(ME), 'wallets', ME, 'transactions')));
+  });
+
+  test('completing a trade rewards both members once', async () => {
+    const sent = await acceptedTrade();
+    await openWallet(dbAs(OTHER), OTHER);
+    await assertSucceeds(confirm(dbAs(ME), ME, sent.tradeId));
+    assert.equal(await balanceOf(ME), WELCOME, 'nothing before both confirmed');
+
+    await assertSucceeds(confirm(dbAs(OTHER), OTHER, sent.tradeId));
+    assert.equal((await read(`trades/${sent.tradeId}`)).status, 'completed');
+    for (const [uid, other] of [[ME, OTHER], [OTHER, ME]]) {
+      assert.equal(await balanceOf(uid), WELCOME + REWARD);
+      const ledger = await ledgerOf(uid);
+      assert.deepEqual(Object.keys(ledger).sort(), [`${sent.tradeId}_reward`, 'welcome'].sort());
+      assert.equal(ledger[`${sent.tradeId}_reward`].counterpartyId, other);
+    }
+  });
+
+  test("the payer's credits go to the other member, whoever confirms last", async () => {
+    for (const last of [OTHER, ME]) {
+      await env.clearFirestore();
+      const sent = await creditTrade(ME, OTHER, 30);
+      const first = last === ME ? OTHER : ME;
+      await confirm(dbAs(first), first, sent.tradeId);
+      await assertSucceeds(confirm(dbAs(last), last, sent.tradeId));
+
+      assert.equal(await balanceOf(ME), WELCOME + REWARD - 30);
+      assert.equal(await balanceOf(OTHER), WELCOME + REWARD + 30);
+      const paid = (await ledgerOf(ME))[`${sent.tradeId}_payment`];
+      const received = (await ledgerOf(OTHER))[`${sent.tradeId}_payment`];
+      assert.deepEqual([paid.kind, paid.amount], ['tradePayment', -30]);
+      assert.deepEqual([received.kind, received.amount], ['tradeIncome', 30]);
+    }
+  });
+
+  test('a payer can spend all their credits', async () => {
+    const sent = await creditTrade(OTHER, ME, WELCOME + REWARD);
+    await confirm(dbAs(ME), ME, sent.tradeId);
+    await assertSucceeds(confirm(dbAs(OTHER), OTHER, sent.tradeId));
+    assert.equal(await balanceOf(OTHER), 0);
+  });
+});
+
+describe('wallets: what the rules must refuse', () => {
+  test("reading another member's wallet or ledger", async () => {
+    await seedAccounts(ME, OTHER);
+    await openWallet(dbAs(ME), ME);
+    await assertFails(getDoc(walletRef(dbAs(OTHER), ME)));
+    await assertFails(getDoc(entryRef(dbAs(OTHER), ME, 'welcome')));
+    await assertFails(getDocs(collection(dbAs(OTHER), 'wallets', ME, 'transactions')));
+    await assertFails(getDocs(collection(dbAs(ME), 'wallets')));
+    await assertFails(getDoc(walletRef(anonymousDb(), ME)));
+  });
+
+  test('opening a wallet with other credits, for someone else, or twice', async () => {
+    await seedAccounts(ME, OTHER);
+    const welcome = (amount) => ({ kind: 'welcome', amount, createdAt: serverTimestamp() });
+    const open = (db, uid, balance, entry = welcome(balance)) => {
+      const batch = writeBatch(db);
+      batch.set(walletRef(db, uid), { uid, balance, updatedAt: serverTimestamp() });
+      if (entry) batch.set(entryRef(db, uid, 'welcome'), entry);
+      return batch.commit();
+    };
+    await assertFails(open(dbAs(ME), ME, 1000));
+    await assertFails(open(dbAs(ME), ME, WELCOME, null));
+    await assertFails(open(dbAs(ME), ME, WELCOME, welcome(1000)));
+    await assertFails(open(dbAs(ME), OTHER, WELCOME));
+    await assertFails(
+      setDoc(walletRef(dbAs(ME), ME), { uid: ME, balance: WELCOME, lastTradeId: 'x', updatedAt: serverTimestamp() }),
+    );
+
+    await openWallet(dbAs(ME), ME);
+    // Opening again is an update, and a second welcome entry is refused.
+    await assertFails(open(dbAs(ME), ME, WELCOME));
+    await assertFails(setDoc(entryRef(dbAs(ME), ME, 'welcome'), welcome(WELCOME)));
+    assert.equal(await balanceOf(ME), WELCOME);
+  });
+
+  test('opening a wallet with the balance 120.0 rather than 120', async () => {
+    await seedAccounts(ME);
+    // The JS SDK sends 120.0 as an integer, so this is the wire format a
+    // modified client could send: the same write as openWallet, with the
+    // balance as a doubleValue or, to show the request is otherwise
+    // allowed, an integerValue.
+    const { host, port } = env.emulators.firestore;
+    const documents = 'projects/demo-souq-skills/databases/(default)/documents';
+    const now = Math.floor(Date.now() / 1000);
+    const token = [
+      { alg: 'none', typ: 'JWT' },
+      {
+        iss: 'https://securetoken.google.com/demo-souq-skills',
+        aud: 'demo-souq-skills',
+        sub: ME,
+        user_id: ME,
+        phone_number: '+966500000000',
+        firebase: { sign_in_provider: 'phone' },
+        auth_time: now,
+        iat: now,
+        exp: now + 3600,
+      },
+    ].map((part) => Buffer.from(JSON.stringify(part)).toString('base64url')).join('.') + '.';
+    const create = (path, fields, timeField) => ({
+      update: { name: `${documents}/${path}`, fields },
+      currentDocument: { exists: false },
+      updateTransforms: [{ fieldPath: timeField, setToServerValue: 'REQUEST_TIME' }],
+    });
+    const openWith = (balance) =>
+      fetch(`http://${host}:${port}/v1/${documents}:commit`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          writes: [
+            create(`wallets/${ME}`, { uid: { stringValue: ME }, balance }, 'updatedAt'),
+            create(
+              `wallets/${ME}/transactions/welcome`,
+              { kind: { stringValue: 'welcome' }, amount: { integerValue: String(WELCOME) } },
+              'createdAt',
+            ),
+          ],
+        }),
+      });
+
+    const asDouble = await openWith({ doubleValue: WELCOME });
+    assert.equal(asDouble.status, 403);
+    assert.equal(await read(`wallets/${ME}`), undefined);
+
+    const asInteger = await openWith({ integerValue: String(WELCOME) });
+    assert.equal(asInteger.status, 200);
+    assert.equal(await balanceOf(ME), WELCOME);
+  });
+
+  test('changing a balance or the ledger directly, or deleting them', async () => {
+    await seedAccounts(ME, OTHER);
+    await openWallet(dbAs(ME), ME);
+    await openWallet(dbAs(OTHER), OTHER);
+    const mine = walletRef(dbAs(ME), ME);
+    await assertFails(updateDoc(mine, { balance: 100000, updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(mine, { balance: increment(50), updatedAt: serverTimestamp() }));
+    await assertFails(updateDoc(walletRef(dbAs(ME), OTHER), { balance: increment(-50), updatedAt: serverTimestamp() }));
+    await assertFails(deleteDoc(mine));
+    await assertFails(updateDoc(entryRef(dbAs(ME), ME, 'welcome'), { amount: 100000 }));
+    await assertFails(deleteDoc(entryRef(dbAs(ME), ME, 'welcome')));
+    await assertFails(
+      setDoc(entryRef(dbAs(ME), ME, 'gift'), { kind: 'tradeReward', amount: 50, createdAt: serverTimestamp() }),
+    );
+    await assertFails(
+      setDoc(entryRef(dbAs(ME), OTHER, 'gift'), { kind: 'welcome', amount: WELCOME, createdAt: serverTimestamp() }),
+    );
+    assert.equal(await balanceOf(ME), WELCOME);
+    assert.equal(await balanceOf(OTHER), WELCOME);
+  });
+
+  test('completing a trade without paying both wallets, or paying without completing', async () => {
+    const sent = await creditTrade(ME, OTHER, 30);
+    await confirm(dbAs(ME), ME, sent.tradeId);
+    const as = (tamper) => confirm(dbAs(OTHER), OTHER, sent.tradeId, { tamper });
+    const reward = `${sent.tradeId}_reward`;
+    // Completed without any payment, as before wallets.
+    await assertFails(as(() => []));
+    // Only one wallet paid.
+    await assertFails(as((members) => members.filter((member) => member.uid === OTHER)));
+    // A wallet changed without its entries, or entries without the wallet.
+    await assertFails(as(changeMember(ME, (member) => ({ ...member, entries: {} }))));
+    await assertFails(as(changeMember(ME, (member) => ({ ...member, skipWallet: true }))));
+    // The payment entries left out.
+    await assertFails(as((members) => members.map((member) => ({ ...member, entries: { [reward]: member.entries[reward] } }))));
+    // Paid while the trade stays accepted.
+    const db = dbAs(OTHER);
+    await assertFails(
+      runTransaction(db, async (transaction) => {
+        const trade = (await transaction.get(doc(db, 'trades', sent.tradeId))).data();
+        applySettlement(transaction, db, sent.tradeId, settlementOf(sent.tradeId, trade));
+      }),
+    );
+    assert.equal((await read(`trades/${sent.tradeId}`)).status, 'accepted');
+    assert.equal(await balanceOf(ME), WELCOME);
+    assert.equal(await balanceOf(OTHER), WELCOME);
+  });
+
+  test('paying other amounts, kinds or members than the trade says', async () => {
+    const sent = await creditTrade(ME, OTHER, 30);
+    await confirm(dbAs(ME), ME, sent.tradeId);
+    await openWallet(dbAs(THIRD), THIRD);
+    const as = (tamper) => confirm(dbAs(OTHER), OTHER, sent.tradeId, { tamper });
+    const reward = `${sent.tradeId}_reward`;
+    const payment = `${sent.tradeId}_payment`;
+    // The receiver takes more, or the payer pays less.
+    await assertFails(as(changeMember(OTHER, (member) => ({ ...member, delta: member.delta + 100 }))));
+    await assertFails(as(changeMember(ME, (member) => ({ ...member, delta: REWARD }))));
+    // Entries that do not match the trade.
+    await assertFails(as(changeEntry(OTHER, reward, (entry) => ({ ...entry, amount: 50 }))));
+    await assertFails(as(changeEntry(ME, payment, (entry) => ({ ...entry, amount: 30, kind: 'tradeIncome' }))));
+    await assertFails(as(changeEntry(OTHER, payment, (entry) => ({ ...entry, kind: 'tradePayment' }))));
+    await assertFails(as(changeEntry(OTHER, reward, (entry) => ({ ...entry, counterpartyId: THIRD }))));
+    await assertFails(as(changeEntry(OTHER, reward, (entry) => ({ ...entry, extra: true }))));
+    // An extra entry, a third member's wallet, or one member paid as another.
+    await assertFails(as(changeEntry(OTHER, `${sent.tradeId}_bonus`, () => ({ kind: 'tradeReward', amount: REWARD, tradeId: sent.tradeId, counterpartyId: ME, createdAt: serverTimestamp() }))));
+    await assertFails(as((members) => [...members, { uid: THIRD, delta: REWARD, entries: { [reward]: members[0].entries[reward] } }]));
+    await assertFails(as(changeMember(OTHER, (member) => ({ ...member, uid: THIRD }))));
+
+    assert.equal(await balanceOf(ME), WELCOME);
+    assert.equal(await balanceOf(OTHER), WELCOME);
+    assert.equal(await balanceOf(THIRD), WELCOME);
+    await assertSucceeds(as((members) => members));
+  });
+
+  test('paying or rewarding a completed trade again', async () => {
+    const sent = await creditTrade(ME, OTHER, 30);
+    await confirm(dbAs(ME), ME, sent.tradeId);
+    await confirm(dbAs(OTHER), OTHER, sent.tradeId);
+    const balances = [await balanceOf(ME), await balanceOf(OTHER)];
+    const trade = await read(`trades/${sent.tradeId}`);
+
+    for (const db of [dbAs(ME), dbAs(OTHER)]) {
+      await assertFails(
+        runTransaction(db, async (transaction) =>
+          applySettlement(transaction, db, sent.tradeId, settlementOf(sent.tradeId, trade))),
+      );
+      await assertFails(
+        updateDoc(walletRef(db, OTHER), { balance: increment(40), lastTradeId: 'another', updatedAt: serverTimestamp() }),
+      );
+    }
+    await assertFails(confirm(dbAs(OTHER), OTHER, sent.tradeId));
+    assert.deepEqual([await balanceOf(ME), await balanceOf(OTHER)], balances);
+  });
+
+  test('completing when the payer cannot pay, or without the other wallet', async () => {
+    const sent = await creditTrade(ME, OTHER, 200);
+    await confirm(dbAs(ME), ME, sent.tradeId);
+    // The payee cannot see the payer's balance; the rules refuse it.
+    await assertFails(confirm(dbAs(OTHER), OTHER, sent.tradeId));
+    assert.equal((await read(`trades/${sent.tradeId}`)).status, 'accepted');
+    assert.equal(await balanceOf(OTHER), WELCOME);
+
+    await env.clearFirestore();
+    const second = await acceptedTrade();
+    await confirm(dbAs(ME), ME, second.tradeId);
+    // Without confirm's own opening of OTHER's wallet.
+    const db = dbAs(OTHER);
+    await assertFails(
+      runTransaction(db, async (transaction) => {
+        const ref = doc(db, 'trades', second.tradeId);
+        const trade = (await transaction.get(ref)).data();
+        transaction.update(ref, {
+          completedBy: { ...trade.completedBy, [OTHER]: serverTimestamp() },
+          status: 'completed',
+          updatedAt: serverTimestamp(),
+          updatedBy: OTHER,
+        });
+        applySettlement(transaction, db, second.tradeId, settlementOf(second.tradeId, trade));
+      }),
+    );
+  });
+
+  test('a member outside the trade, or a disputed trade, is never paid', async () => {
+    const sent = await creditTrade(ME, OTHER, 30);
+    await openWallet(dbAs(THIRD), THIRD);
+    const trade = await read(`trades/${sent.tradeId}`);
+    const db = dbAs(THIRD);
+    await assertFails(
+      runTransaction(db, async (transaction) =>
+        applySettlement(transaction, db, sent.tradeId, [
+          { uid: THIRD, delta: 40, entries: settlementOf(sent.tradeId, trade)[1].entries },
+        ])),
+    );
+    await updateDoc(doc(dbAs(OTHER), 'trades', sent.tradeId), {
+      status: 'disputed',
+      updatedAt: serverTimestamp(),
+      updatedBy: OTHER,
+    });
+    await assertFails(confirm(dbAs(OTHER), OTHER, sent.tradeId));
+    assert.equal(await balanceOf(OTHER), WELCOME);
+    assert.equal(await balanceOf(THIRD), WELCOME);
   });
 });

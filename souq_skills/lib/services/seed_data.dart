@@ -1,5 +1,6 @@
 import 'package:souq_skills/core/app_routes.dart';
 import 'package:souq_skills/core/badge_config.dart';
+import 'package:souq_skills/data/wallet_repository.dart';
 import 'package:souq_skills/models/app_settings.dart';
 import 'package:souq_skills/models/dispute_case.dart';
 import 'package:souq_skills/models/group_trade.dart';
@@ -56,7 +57,7 @@ class SeedData {
   final Set<String> blockedMemberIds;
   final AppSettings settings;
 
-  static const welcomeCredits = 120;
+  static const welcomeCredits = WalletDocument.welcomeCredits;
 
   /// Community data only, for someone who just created an account.
   factory SeedData.newMember(User user) {

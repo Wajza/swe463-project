@@ -10,6 +10,7 @@ import 'package:souq_skills/models/trade_session.dart';
 import 'package:souq_skills/models/user.dart';
 
 import 'auth_service.dart';
+import 'badge_service.dart';
 import 'chat_service.dart';
 import 'member_service.dart';
 import 'notification_service.dart';
@@ -171,10 +172,11 @@ class OnlineTrades {
         for (final item in items) item.trade.otherMemberId,
       }),
     );
+    // Credits for completed trades are paid online, into both wallets.
+    if (items.any((item) => item.trade.isComplete)) BadgeService().sync();
     for (final item in items) {
       final before = previous[item.trade.id]?.trade;
       final trade = item.trade;
-      if (trade.isComplete) TradeService().recordCompletion(trade);
       // Only what changes while listening; older trades are just shown.
       if (!wasLoaded || before == null) continue;
       if (trade.isComplete && !before.isComplete) {

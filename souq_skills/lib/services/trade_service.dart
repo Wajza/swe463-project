@@ -1,4 +1,5 @@
 import 'package:souq_skills/core/app_routes.dart';
+import 'package:souq_skills/data/wallet_repository.dart';
 import 'package:souq_skills/models/notification.dart';
 import 'package:souq_skills/models/trade.dart';
 import 'package:souq_skills/models/transaction.dart';
@@ -14,7 +15,7 @@ import 'wallet_service.dart';
 /// Trades kept on this device (demo members and the offline demo) and
 /// trades with real members, kept online by [OnlineTrades].
 class TradeService {
-  static const completionCredits = 10;
+  static const completionCredits = WalletDocument.completionReward;
 
   final Repository _repo = Repository.instance;
 
@@ -81,8 +82,10 @@ class TradeService {
 
   /// Records the current user's side of completed [trade] in their wallet
   /// on this device, once: the completion reward and any credits paid.
-  /// Moving credits between members online is not done yet.
+  /// Trades with real members are paid online instead, in both members'
+  /// wallets, when they complete (see [OnlineWallet]).
   void recordCompletion(Trade trade, {bool syncBadges = true}) {
+    if (OnlineTrades.trade(trade.id) != null) return;
     final recorded = _repo.transactions.any(
       (item) => item.tradeId == trade.id && item.title == 'Trade completed',
     );

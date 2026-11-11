@@ -6,6 +6,8 @@ import 'package:souq_skills/models/trade_proposal.dart';
 import 'package:souq_skills/models/trade_session.dart';
 import 'package:souq_skills/models/user.dart';
 
+import 'wallet_repository.dart';
+
 /// A trade problem explained in words the member can act on.
 class TradeException implements Exception {
   const TradeException(this.message);
@@ -27,6 +29,9 @@ class TradeException implements Exception {
   static const pastSession = TradeException('Choose a time in the future');
   static const alreadyConfirmed = TradeException(
     'You already confirmed this trade.',
+  );
+  static const insufficientCredits = TradeException(
+    'You do not have enough credits to complete this trade.',
   );
 
   @override
@@ -117,8 +122,15 @@ abstract class TradeRepository {
   });
 
   /// Records that [uid] confirmed [tradeId] is complete; returns whether
-  /// both members have now, which completes it. Throws a [TradeException].
+  /// both members have now, which completes it. Completing pays both
+  /// members' [wallets] in the same write: the completion reward to each,
+  /// and the trade's credits from the member who offered them to the
+  /// other, exactly once. Throws a [TradeException], such as
+  /// [TradeException.insufficientCredits].
   Future<bool> confirmCompletion(String uid, String tradeId);
+
+  /// The members' wallets, kept with their trades.
+  WalletRepository get wallets;
 
   /// Marks accepted trade [tradeId] as disputed. Throws a [TradeException].
   Future<void> markDisputed(String uid, String tradeId);
@@ -524,12 +536,26 @@ abstract final class TradeDocument {
       items.toList()..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 }
 
+/// Opens [uid]'s wallet if needed, as a completion pays into it.
+Future<void> _openWallet(WalletRepository wallets, String uid) async {
+  try {
+    await wallets.openWallet(uid);
+  } on WalletException catch (error) {
+    throw TradeException(error.message);
+  }
+}
+
 /// Trades in Cloud Firestore.
 class FirebaseTradeRepository implements TradeRepository {
   FirebaseTradeRepository({FirebaseFirestore? firestore})
     : _firestore = firestore ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _firestore;
+
+  @override
+  late final FirebaseWalletRepository wallets = FirebaseWalletRepository(
+    firestore: _firestore,
+  );
 
   CollectionReference<Map<String, dynamic>> get _trades =>
       _firestore.collection('trades');
@@ -669,11 +695,21 @@ class FirebaseTradeRepository implements TradeRepository {
   @override
   Future<bool> confirmCompletion(String uid, String tradeId) async {
     final tradeRef = _trade(tradeId);
+    await _openWallet(wallets, uid);
     var completed = false;
     await _change(tradeRef, (transaction, trade) async {
       final result = TradeDocument.confirm(uid, trade: trade, now: _now);
+      var settlement = const <WalletSettlement>[];
+      if (result.completed) {
+        // Reads come before writes. Only the caller's own wallet can be
+        // read; the rules check the other member's.
+        final own = await transaction.get(wallets.wallet(uid));
+        WalletDocument.checkCanSettle(uid, trade, own.data());
+        settlement = WalletDocument.settle(tradeId, trade, _now);
+      }
       completed = result.completed;
       _apply(transaction, tradeRef, result.change);
+      wallets.applySettlement(transaction, tradeId, settlement, _now);
     });
     return completed;
   }
@@ -788,11 +824,17 @@ class FirebaseTradeRepository implements TradeRepository {
 class DemoTradeRepository implements TradeRepository {
   /// [isRealMember] says whether a uid has an account, and [hasBlocked]
   /// whether the first member blocked the second, as the rules check them.
+  /// Completed trades are paid into [wallets].
   DemoTradeRepository({
     bool Function(String uid)? isRealMember,
     bool Function(String uid, String otherUid)? hasBlocked,
+    DemoWalletRepository? wallets,
   }) : _isRealMember = isRealMember ?? ((_) => true),
-       _hasBlocked = hasBlocked ?? ((_, _) => false);
+       _hasBlocked = hasBlocked ?? ((_, _) => false),
+       wallets = wallets ?? DemoWalletRepository();
+
+  @override
+  final DemoWalletRepository wallets;
 
   final bool Function(String uid) _isRealMember;
   final bool Function(String uid, String otherUid) _hasBlocked;
@@ -946,11 +988,12 @@ class DemoTradeRepository implements TradeRepository {
 
   @override
   Future<bool> confirmCompletion(String uid, String tradeId) async {
-    final result = TradeDocument.confirm(
-      uid,
-      trade: _trade(tradeId),
-      now: _now(),
-    );
+    await _openWallet(wallets, uid);
+    final trade = _trade(tradeId);
+    final now = _now();
+    final result = TradeDocument.confirm(uid, trade: trade, now: now);
+    // Paid together with the completion, or neither happens.
+    if (result.completed) wallets.settle(uid, tradeId, trade, now);
     _apply(tradeId, result.change);
     _changes.add(null);
     return result.completed;

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:souq_skills/screens/shell/main_shell.dart';
 import 'package:souq_skills/services/auth_service.dart';
+import 'package:souq_skills/services/chat_service.dart';
 import 'package:souq_skills/services/member_simulator.dart';
 import 'package:souq_skills/services/repository.dart';
 import 'package:souq_skills/widgets/souq_button.dart';
@@ -38,6 +39,8 @@ class _AppGateState extends State<AppGate> {
     }
     // After the saved data, which would otherwise replace the profile.
     await AuthService().loadSessionProfile();
+    // A session restored from an earlier visit starts its chats here.
+    ChatService.syncSession();
     if (!_resumed) {
       _resumed = true;
       MemberSimulator().resumePendingProposals();
@@ -69,6 +72,8 @@ class _AppGateState extends State<AppGate> {
           );
         }
         if (snapshot.hasError) {
+          // The page gives no details, so the reason goes to the console.
+          debugPrint('Could not load your data: ${snapshot.error}');
           return StatusPage(
             icon: Icons.cloud_off_outlined,
             showBackButton: false,

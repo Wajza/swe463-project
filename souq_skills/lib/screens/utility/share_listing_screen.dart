@@ -23,16 +23,21 @@ class ShareListingScreen extends StatelessWidget {
     if (context.mounted) context.showMessage('Link copied');
   }
 
-  void _sendToChat(
+  Future<void> _sendToChat(
     BuildContext context,
     SkillListing listing,
     String memberId,
-  ) {
-    ChatService().post(
-      memberId,
-      'Check out this skill: ${listing.title}\n$_link',
-    );
-    context.replaceWith(AppRoutes.chat, args: memberId);
+  ) async {
+    try {
+      await ChatService().postToMember(
+        memberId,
+        'Check out this skill: ${listing.title}\n$_link',
+      );
+    } on ChatException catch (error) {
+      if (context.mounted) context.showMessage(error.message);
+      return;
+    }
+    if (context.mounted) context.replaceWith(AppRoutes.chat, args: memberId);
   }
 
   @override

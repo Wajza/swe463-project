@@ -1,10 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:souq_skills/core/app_theme.dart';
 
 class ChatComposer extends StatefulWidget {
-  const ChatComposer({required this.onSend, super.key});
+  const ChatComposer({required this.onSend, this.isSending = false, super.key});
 
-  final ValueChanged<String> onSend;
+  /// Sends the text. The field is cleared once it was sent: unless this
+  /// returns false, in which case the text stays for another try.
+  final FutureOr<bool?> Function(String text) onSend;
+
+  /// While a message is on its way, Send does nothing.
+  final bool isSending;
 
   @override
   State<ChatComposer> createState() => _ChatComposerState();
@@ -19,11 +26,14 @@ class _ChatComposerState extends State<ChatComposer> {
     super.dispose();
   }
 
-  void _send() {
+  Future<void> _send() async {
     final text = _controller.text.trim();
-    if (text.isEmpty) return;
-    widget.onSend(text);
-    _controller.clear();
+    if (text.isEmpty || widget.isSending) return;
+    final sent = await widget.onSend(text);
+    // Kept if it failed, or if the member already typed something else.
+    if (sent != false && mounted && _controller.text.trim() == text) {
+      _controller.clear();
+    }
   }
 
   @override

@@ -163,6 +163,7 @@ souq_skills/lib/
 | Blocked members | Firestore `users/{uid}/blocked/{blockedUid}`, private to the member who blocked; only real accounts, never oneself. Blocks of the built-in demo members stay on the device | `BlockedMembersRepository`, `SafetyService` |
 | Reports | Firestore `reports/{reportId}`; see *Reports* below | `ReportRepository`, `SafetyService` |
 | Reviews | Firestore `reviews/{reviewId}`; see *Ratings and badges* below | `ReviewRepository`, `ReviewService` |
+| Direct chats with real members | Firestore `conversations/{dm_smallerUid_largerUid}` with the latest message and each member's read time, and its `messages/{messageId}` by uid only. Readable by the two members only; messages are never changed or deleted. Live while signed in | `ChatRepository`, `ChatService` |
 
 **Reports.** Each report is one document in the top-level `reports` collection:
 
@@ -243,8 +244,8 @@ Everything else is still kept on the device only: trades, proposals, chats, grou
 
 ## Known issues and limitations
 
-- **Only part of the data is shared.** Accounts, profiles, public profiles, usernames, listings, saved skills, blocks, reports and complaints, and ratings of real members are in Firebase. Trades, proposals, chats, group trades, the wallet, notifications, disputes opened from a trade, and everything about the built-in demo members still stay on one device.
-- **Other members are simulated** for the features that stay on the device. `MemberSimulator` accepts proposals after about 30 seconds, and within about 2 seconds replies in chat, accepts group invitations and returns a 5-star rating.
+- **Only part of the data is shared.** Accounts, profiles, public profiles, usernames, listings, saved skills, blocks, reports and complaints, and ratings of real members, and direct chats between real members are in Firebase. Trades, proposals, group chats, group trades, the wallet, notifications, disputes opened from a trade, and everything about the built-in demo members still stay on one device.
+- **Other members are simulated** for the features that stay on the device, and only the built-in demo members (everyone in the offline demo); real members are never simulated. `MemberSimulator` accepts proposals after about 30 seconds, and within about 2 seconds replies in chat, accepts group invitations and returns a 5-star rating.
 - **Ratings are not tied to a verified trade.** Trades are still kept on each device, so the server cannot confirm that the trade in `contextId` exists, finished, or included both members. Any signed-in member can rate any real member once. Server-side trade completion and participant checks are needed once trades move to Firebase.
 - **One rating per member, not per trade.** Rating the same member after a second exchange is refused, so the trade screen may still offer *Rate* for that exchange; the rating screen then says *Already rated*.
 - **Trade badges count device trades only.** *First Exchange*, *Trusted Trader* and *Community Builder* follow trades and group trades on the device until those are in Firebase.
@@ -255,7 +256,7 @@ Everything else is still kept on the device only: trades, proposals, chats, grou
 - **Push notifications are in-app only.**
 - **Other members' public profiles are fetched once and then kept on the device;** changes they make show after the app is restarted on a new account or the copy is refreshed.
 - **Blocking is one-way and silent.** A blocked member is not told, and still sees the listings of the member who blocked them. Blocking hides their listings on Home and in Saved skills, and on their listing and profile it offers only Unblock.
-- **Blocked members can still be reached from chats and trades.** Those features stay on the device and only hide blocked members from the chat list and group invites; they do not check blocks on the server.
+- **Blocked members can still be reached from trades and group chats.** Those stay on the device and only hide blocked members from the chat list and group invites. Direct chats are checked on the server: neither member can message the other while either has blocked them, and the sender is only told the message could not be sent.
 - **Trade ids in reports are not checked.** Trades are still kept on each device, so a trade report or dispute stores the reporter's local trade id. The server cannot confirm that the trade exists or that the reporter took part, until trades move to Firebase.
 - **Disputes still stay on the device.** The *Open a dispute* screen (trade flow) calls the device-only `SafetyService.disputeTrade`. `SafetyService.submitTradeDispute` sends the dispute online first and only then marks the trade as disputed; the dispute screen needs to switch to it, awaiting it and showing its errors, before disputes are shared online.
 - **A manual check on a physical device has not been recorded,** including the device location permission prompt. Automated tests and a web build pass.

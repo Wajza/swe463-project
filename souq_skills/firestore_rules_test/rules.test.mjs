@@ -1,5 +1,5 @@
-// Firestore security rules tests for Souq Skills profiles, usernames and
-// listings.
+// Firestore security rules tests for Souq Skills profiles, usernames,
+// listings, blocks, reports, reviews and chats.
 //
 // Run from souq_skills/ (starts and stops the emulator, deploys nothing):
 //   firebase emulators:exec --only firestore --project demo-souq-skills \
@@ -28,6 +28,7 @@ import {
   getDoc,
   getDocs,
   limit,
+  orderBy,
   query,
   runTransaction,
   serverTimestamp,
@@ -1987,5 +1988,292 @@ describe('reviews: what the rules must refuse', () => {
       await assertFails(updateDoc(ref(db), { rating: 1 }));
       await assertFails(deleteDoc(ref(db)));
     }
+  });
+});
+
+// Chats: conversations/{conversationId} and conversations/{id}/messages
+
+const conversationIdOf = (a, b) => (a < b ? `dm_${a}_${b}` : `dm_${b}_${a}`);
+const conversationRef = (db, a, b) => doc(db, 'conversations', conversationIdOf(a, b));
+
+/// Mirrors FirebaseChatRepository.sendMessage: the message and its
+/// conversation in one batch, the conversation merged. [message] and
+/// [conversation] replace fields, and [conversationId] the chat written to,
+/// for what must be refused. Resolves to the message id.
+async function sendMessage(db, uid, memberId, text = 'Hello', { message = {}, conversation = {}, conversationId } = {}) {
+  const chat = conversationId ? doc(db, 'conversations', conversationId) : conversationRef(db, uid, memberId);
+  const messageRef = doc(collection(chat, 'messages'));
+  const batch = writeBatch(db);
+  batch.set(messageRef, { senderId: uid, text, kind: 'text', createdAt: serverTimestamp(), ...message });
+  batch.set(
+    chat,
+    {
+      kind: 'direct',
+      participantIds: [uid, memberId].sort(),
+      lastMessage: text,
+      lastMessageId: messageRef.id,
+      lastSenderId: uid,
+      lastAt: serverTimestamp(),
+      lastReadAt: { [uid]: serverTimestamp() },
+      ...conversation,
+    },
+    { merge: true },
+  );
+  await batch.commit();
+  return messageRef.id;
+}
+
+/// Mirrors FirebaseChatRepository.watchConversations (one snapshot of it).
+async function fetchConversations(db, uid) {
+  const snapshot = await getDocs(
+    query(collection(db, 'conversations'), where('participantIds', 'array-contains', uid), limit(200)),
+  );
+  return snapshot.docs.map((item) => item.id).sort();
+}
+
+/// Mirrors FirebaseChatRepository.watchMessages (one snapshot of it):
+/// the texts, oldest first.
+async function fetchMessages(db, uid, memberId) {
+  const snapshot = await getDocs(
+    query(collection(conversationRef(db, uid, memberId), 'messages'), orderBy('createdAt', 'desc'), limit(200)),
+  );
+  return snapshot.docs.map((item) => item.data().text).reverse();
+}
+
+/// Mirrors FirebaseChatRepository.markConversationRead.
+const markRead = (db, uid, memberId) =>
+  updateDoc(conversationRef(db, uid, memberId), { [`lastReadAt.${uid}`]: serverTimestamp() });
+
+const chatPath = (a, b) => `conversations/${conversationIdOf(a, b)}`;
+
+describe('chats: what the rules must allow', () => {
+  test('a member starts a chat, and both members can read it', async () => {
+    await seedAccounts(ME, OTHER);
+    await assertSucceeds(sendMessage(dbAs(ME), ME, OTHER, 'Hello'));
+
+    assert.deepEqual(await fetchConversations(dbAs(ME), ME), [conversationIdOf(ME, OTHER)]);
+    assert.deepEqual(await fetchConversations(dbAs(OTHER), OTHER), [conversationIdOf(ME, OTHER)]);
+    assert.deepEqual(await fetchMessages(dbAs(OTHER), OTHER, ME), ['Hello']);
+    await assertSucceeds(getDoc(conversationRef(dbAs(OTHER), OTHER, ME)));
+
+    const stored = await read(chatPath(ME, OTHER));
+    assert.deepEqual(stored.participantIds, [ME, OTHER].sort());
+    assert.equal(stored.lastSenderId, ME);
+    assert.deepEqual(Object.keys(stored.lastReadAt), [ME]);
+  });
+
+  test('the other member replies in the same chat, in order', async () => {
+    await seedAccounts(ME, OTHER);
+    await sendMessage(dbAs(ME), ME, OTHER, 'Hello');
+    await assertSucceeds(sendMessage(dbAs(OTHER), OTHER, ME, 'Hi back'));
+    await assertSucceeds(sendMessage(dbAs(ME), ME, OTHER, 'How are you?'));
+
+    assert.deepEqual(await fetchMessages(dbAs(ME), ME, OTHER), ['Hello', 'Hi back', 'How are you?']);
+    const stored = await read(chatPath(ME, OTHER));
+    assert.equal(stored.lastMessage, 'How are you?');
+    assert.equal(stored.lastSenderId, ME);
+    assert.deepEqual(Object.keys(stored.lastReadAt).sort(), [ME, OTHER].sort());
+  });
+
+  test('each member marks the chat read, changing only their own time', async () => {
+    await seedAccounts(ME, OTHER);
+    await sendMessage(dbAs(ME), ME, OTHER, 'Hello');
+    const before = await read(chatPath(ME, OTHER));
+
+    await assertSucceeds(markRead(dbAs(OTHER), OTHER, ME));
+    await assertSucceeds(markRead(dbAs(ME), ME, OTHER));
+
+    const after = await read(chatPath(ME, OTHER));
+    assert.ok(after.lastReadAt[OTHER]);
+    assert.equal(after.lastMessage, before.lastMessage);
+    assert.equal(after.lastMessageId, before.lastMessageId);
+  });
+
+  test('trade notes and proposal cards with safe references', async () => {
+    await seedAccounts(ME, OTHER);
+    await assertSucceeds(
+      sendMessage(dbAs(ME), ME, OTHER, 'Session scheduled.', { message: { kind: 'system', tradeId: 'trade1' } }),
+    );
+    await assertSucceeds(
+      sendMessage(dbAs(OTHER), OTHER, ME, 'Trade proposal', {
+        message: { kind: 'proposal', proposalId: 'proposal1', tradeId: 'trade1' },
+      }),
+    );
+  });
+
+  test('a message of 1000 characters', async () => {
+    await seedAccounts(ME, OTHER);
+    await assertSucceeds(sendMessage(dbAs(ME), ME, OTHER, 'x'.repeat(1000)));
+  });
+});
+
+describe('chats: what the rules must refuse', () => {
+  test('nobody else can read a chat or its messages', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+    await sendMessage(dbAs(ME), ME, OTHER, 'Hello');
+
+    const outsider = dbAs(THIRD);
+    await assertFails(getDoc(conversationRef(outsider, ME, OTHER)));
+    await assertFails(getDocs(collection(outsider, 'conversations')));
+    await assertFails(getDocs(query(collection(outsider, 'conversations'), where('participantIds', 'array-contains', ME))));
+    await assertFails(getDocs(collection(conversationRef(outsider, ME, OTHER), 'messages')));
+    assert.deepEqual(await fetchConversations(outsider, THIRD), []);
+
+    const anonymous = anonymousDb();
+    await assertFails(getDoc(conversationRef(anonymous, ME, OTHER)));
+    await assertFails(getDocs(collection(conversationRef(anonymous, ME, OTHER), 'messages')));
+  });
+
+  test('nobody can send as another member', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+    // Another account writes the whole message as ME.
+    await assertFails(sendMessage(dbAs(THIRD), ME, OTHER, 'Hello'));
+    // A member writes a message signed by the other member.
+    await assertFails(sendMessage(dbAs(ME), ME, OTHER, 'Hello', { message: { senderId: OTHER } }));
+    await assertFails(sendMessage(dbAs(ME), ME, OTHER, 'Hello', { conversation: { lastSenderId: OTHER } }));
+    await assertFails(sendMessage(dbAs(ME), ME, OTHER, 'Hello', { conversation: { lastReadAt: { [OTHER]: serverTimestamp() } } }));
+    assert.equal(await read(chatPath(ME, OTHER)), undefined);
+  });
+
+  test('nobody can write into a chat they are not in', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+    await sendMessage(dbAs(ME), ME, OTHER, 'Hello');
+    const theirs = conversationIdOf(ME, OTHER);
+
+    // Into the existing chat of two others.
+    await assertFails(sendMessage(dbAs(THIRD), THIRD, OTHER, 'Hi', { conversationId: theirs }));
+    await assertFails(
+      sendMessage(dbAs(THIRD), THIRD, OTHER, 'Hi', {
+        conversationId: theirs,
+        conversation: { participantIds: [ME, OTHER].sort() },
+      }),
+    );
+    assert.deepEqual(await fetchMessages(dbAs(ME), ME, OTHER), ['Hello']);
+  });
+
+  test('a chat id is "dm_" and the two members sorted uids', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+    const [first, second] = [ME, OTHER].sort();
+    await assertFails(sendMessage(dbAs(ME), ME, OTHER, 'Hello', { conversationId: `dm_${second}_${first}` }));
+    await assertFails(sendMessage(dbAs(ME), ME, OTHER, 'Hello', { conversationId: 'chat1' }));
+    await assertFails(sendMessage(dbAs(ME), ME, OTHER, 'Hello', { conversation: { participantIds: [second, first] } }));
+    await assertFails(
+      sendMessage(dbAs(ME), ME, OTHER, 'Hello', {
+        conversationId: `dm_${first}_${second}_${THIRD}`,
+        conversation: { participantIds: [first, second, THIRD] },
+      }),
+    );
+    await assertFails(sendMessage(dbAs(ME), ME, ME, 'Hello', { conversationId: `dm_${ME}_${ME}` }));
+    await assertFails(sendMessage(dbAs(ME), ME, OTHER, 'Hello', { conversation: { kind: 'group' } }));
+  });
+
+  test('only real accounts can be messaged', async () => {
+    await seedAccounts(ME);
+    await assertFails(sendMessage(dbAs(ME), ME, OTHER, 'Hello'));
+    await assertFails(sendMessage(dbAs(ME), ME, 'me', 'Hello'));
+  });
+
+  test('blocked members cannot message each other, either way', async () => {
+    await seedAccounts(ME, OTHER);
+    await sendMessage(dbAs(ME), ME, OTHER, 'Hello');
+
+    await seed({ [`users/${OTHER}/blocked/${ME}`]: { blockedUid: ME, blockedAt: new Date() } });
+    await assertFails(sendMessage(dbAs(ME), ME, OTHER, 'Are you there?'));
+    await assertFails(sendMessage(dbAs(OTHER), OTHER, ME, 'Bye'));
+
+    await env.clearFirestore();
+    await seedAccounts(ME, OTHER);
+    await seed({ [`users/${ME}/blocked/${OTHER}`]: { blockedUid: OTHER, blockedAt: new Date() } });
+    await assertFails(sendMessage(dbAs(OTHER), OTHER, ME, 'Hello'));
+    await assertFails(sendMessage(dbAs(ME), ME, OTHER, 'Hello'));
+  });
+
+  test('a deleted account cannot be messaged any more', async () => {
+    await seedAccounts(ME, OTHER);
+    await sendMessage(dbAs(ME), ME, OTHER, 'Hello');
+    await env.withSecurityRulesDisabled((context) => deleteDoc(doc(context.firestore(), 'users', OTHER)));
+    await assertFails(sendMessage(dbAs(ME), ME, OTHER, 'Still there?'));
+  });
+
+  test('invalid message content is refused', async () => {
+    await seedAccounts(ME, OTHER);
+    const db = dbAs(ME);
+    for (const [text, change] of [
+      ['', {}],
+      ['   ', {}],
+      ['x'.repeat(1001), {}],
+      ['Hello', { message: { kind: 'image' } }],
+      ['Hello', { message: { kind: 'proposal' } }],
+      ['Hello', { message: { proposalId: 'proposal1' } }],
+      ['Hello', { message: { tradeId: 'trade1' } }],
+      ['Hello', { message: { kind: 'proposal', proposalId: 'bad id' } }],
+      ['Hello', { message: { kind: 'system', tradeId: 'bad/id' } }],
+      ['Hello', { message: { senderName: 'Maha' } }],
+      ['Hello', { message: { phone: '512345678' } }],
+      ['Hello', { message: { text: 42 } }],
+      ['Hello', { message: { createdAt: new Date(2020, 0, 1) } }],
+      ['Hello', { conversation: { lastAt: new Date(2020, 0, 1) } }],
+      ['Hello', { conversation: { title: 'Maha and Sami' } }],
+    ]) {
+      await assertFails(sendMessage(db, ME, OTHER, text, change), `${JSON.stringify([text.slice(0, 10), change])} must be refused`);
+    }
+    assert.equal(await read(chatPath(ME, OTHER)), undefined);
+  });
+
+  test('a message is only sent together with its conversation', async () => {
+    await seedAccounts(ME, OTHER);
+    const db = dbAs(ME);
+    const chat = conversationRef(db, ME, OTHER);
+    const alone = (text) =>
+      setDoc(doc(collection(chat, 'messages')), { senderId: ME, text, kind: 'text', createdAt: serverTimestamp() });
+
+    // Before the chat exists, and after.
+    await assertFails(alone('Hello'));
+    const firstId = await sendMessage(db, ME, OTHER, 'Hello');
+    await assertFails(alone('Sneaky'));
+    // The conversation showing another text than the message's.
+    await assertFails(sendMessage(db, ME, OTHER, 'Hello', { conversation: { lastMessage: 'Something else' } }));
+    // Or pointing back at an older message.
+    await assertFails(
+      updateDoc(chat, {
+        lastMessage: 'Hello',
+        lastMessageId: firstId,
+        lastSenderId: ME,
+        lastAt: serverTimestamp(),
+        [`lastReadAt.${ME}`]: serverTimestamp(),
+      }),
+    );
+    assert.deepEqual(await fetchMessages(db, ME, OTHER), ['Hello']);
+  });
+
+  test('messages cannot be edited or deleted', async () => {
+    await seedAccounts(ME, OTHER);
+    const id = await sendMessage(dbAs(ME), ME, OTHER, 'Hello');
+    for (const db of [dbAs(ME), dbAs(OTHER)]) {
+      const message = doc(collection(conversationRef(db, ME, OTHER), 'messages'), id);
+      await assertFails(updateDoc(message, { text: 'Edited' }));
+      await assertFails(deleteDoc(message));
+    }
+    assert.deepEqual(await fetchMessages(dbAs(ME), ME, OTHER), ['Hello']);
+  });
+
+  test('only your own read time can be changed, and only to now', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+    await sendMessage(dbAs(ME), ME, OTHER, 'Hello');
+    const chat = (db) => conversationRef(db, ME, OTHER);
+
+    await assertFails(updateDoc(chat(dbAs(OTHER)), { [`lastReadAt.${ME}`]: serverTimestamp() }));
+    await assertFails(updateDoc(chat(dbAs(ME)), { [`lastReadAt.${ME}`]: new Date(2020, 0, 1) }));
+    await assertFails(updateDoc(chat(dbAs(THIRD)), { [`lastReadAt.${THIRD}`]: serverTimestamp() }));
+    await assertFails(
+      updateDoc(chat(dbAs(ME)), { [`lastReadAt.${ME}`]: serverTimestamp(), participantIds: [ME, THIRD].sort() }),
+    );
+    await assertFails(updateDoc(chat(dbAs(ME)), { [`lastReadAt.${ME}`]: serverTimestamp(), kind: 'group' }));
+    await assertFails(updateDoc(chat(dbAs(ME)), { lastMessage: 'Rewritten' }));
+    for (const db of [dbAs(ME), dbAs(OTHER)]) await assertFails(deleteDoc(chat(db)));
+
+    const stored = await read(chatPath(ME, OTHER));
+    assert.equal(stored.lastMessage, 'Hello');
+    assert.deepEqual(stored.participantIds, [ME, OTHER].sort());
   });
 });

@@ -5,6 +5,7 @@ import 'package:souq_skills/models/conversation.dart';
 import 'package:souq_skills/services/chat_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
 import 'package:souq_skills/widgets/empty_state.dart';
+import 'package:souq_skills/widgets/listings_load_error.dart';
 import 'package:souq_skills/widgets/live_view.dart';
 import 'package:souq_skills/widgets/souq_button.dart';
 import 'package:souq_skills/widgets/user_avatar.dart';
@@ -23,19 +24,29 @@ class ChatsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LiveView(
     builder: (context) {
-      final conversations = ChatService().conversations();
+      final chats = ChatService();
+      final conversations = chats.conversations();
+      final state = chats.loadStateOf(ChatService.conversationList);
       return AppPage(
-        emptyState: EmptyState(
-          title: 'No conversations yet',
-          message: 'Message a member from any listing to start chatting.',
-          icon: Icons.chat_bubble_outline,
-          action: SouqButton(
-            label: 'Browse skills',
-            onPressed: () => context.resetTo(AppRoutes.home),
-          ),
-        ),
+        emptyState: state.isLoading
+            ? const Center(child: CircularProgressIndicator())
+            : EmptyState(
+                title: 'No conversations yet',
+                message: 'Message a member from any listing to start chatting.',
+                icon: Icons.chat_bubble_outline,
+                action: SouqButton(
+                  label: 'Browse skills',
+                  onPressed: () => context.resetTo(AppRoutes.home),
+                ),
+              ),
         title: 'Chats',
         children: [
+          if (state.isFailed)
+            ListingsLoadError(
+              title: 'Could not load chats',
+              message: state.error!,
+              onRetry: () => chats.retry(ChatService.conversationList),
+            ),
           for (final conversation in conversations)
             Card(
               child: ListTile(

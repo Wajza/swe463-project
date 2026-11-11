@@ -10,6 +10,7 @@ class SkillChipEditor extends StatelessWidget {
     required this.skills,
     required this.onAdd,
     required this.onRemove,
+    this.enabled = true,
     super.key,
   });
 
@@ -17,6 +18,9 @@ class SkillChipEditor extends StatelessWidget {
   final List<String> skills;
   final ValueChanged<String> onAdd;
   final ValueChanged<String> onRemove;
+
+  /// False while a change is being saved, so it cannot be made twice.
+  final bool enabled;
 
   Future<void> _add(BuildContext context) async {
     final skill = await OptionSheet.show<String>(
@@ -39,11 +43,15 @@ class SkillChipEditor extends StatelessWidget {
         runSpacing: 4,
         children: [
           for (final skill in skills)
-            InputChip(label: Text(skill), onDeleted: () => onRemove(skill)),
+            InputChip(
+              label: Text(skill),
+              isEnabled: enabled,
+              onDeleted: enabled ? () => onRemove(skill) : null,
+            ),
           ActionChip(
             avatar: const Icon(Icons.add, size: 18),
             label: const Text('Add'),
-            onPressed: () => _add(context),
+            onPressed: enabled ? () => _add(context) : null,
           ),
         ],
       ),

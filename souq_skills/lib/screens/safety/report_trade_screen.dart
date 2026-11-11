@@ -20,12 +20,22 @@ class ReportTradeScreen extends StatelessWidget {
         intro: 'Tell us about the problem with this trade.',
         reasons: AppOptions.tradeIssueReasons,
         submitLabel: 'Submit report',
-        onSubmit: (reason) {
-          final report = SafetyService().reportTrade(
-            tradeId: tradeId,
-            reason: reason,
-          );
-          context.replaceWith(AppRoutes.disputeCaseDetails, args: report.id);
+        askDetails: true,
+        // Shown as received only once it was saved.
+        onSend: (reason, details) async {
+          final String reportId;
+          try {
+            reportId = (await SafetyService().reportTrade(
+              tradeId: tradeId,
+              reason: reason,
+              details: details,
+            )).id;
+          } on ReportException catch (error) {
+            if (context.mounted) context.showMessage(error.message);
+            return;
+          }
+          if (!context.mounted) return;
+          context.replaceWith(AppRoutes.disputeCaseDetails, args: reportId);
           context.showMessage('Report received');
         },
       ),

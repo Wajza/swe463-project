@@ -5,6 +5,7 @@ import 'package:souq_skills/core/feedback.dart';
 import 'package:souq_skills/core/navigation.dart';
 import 'package:souq_skills/core/validators.dart';
 import 'package:souq_skills/models/otp_request.dart';
+import 'package:souq_skills/services/auth_service.dart';
 import 'package:souq_skills/services/profile_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
 import 'package:souq_skills/widgets/app_text_field.dart';
@@ -35,6 +36,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       ? null
       : _user.availability;
   late bool _keepLocationPrivate = !_profile.settings.locationVisible;
+  bool _saving = false;
+
+  /// A new number already confirmed by code, so a retry after a failed
+  /// save does not ask for another code.
+  String? _verifiedPhone;
 
   @override
   void dispose() {
@@ -48,11 +54,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
   /// A new phone number only counts once its code has been verified.
   Future<bool> _verifyPhoneIfChanged(String phone) async {
-    if (phone == _user.phone) return true;
+    if (phone == _user.phone || phone == _verifiedPhone) return true;
+    try {
+      await AuthService().sendCode(phone);
+    } on AuthException catch (error) {
+      if (mounted) context.showMessage(error.message);
+      return false;
+    }
+    if (!mounted) return false;
     final verified = await context.open(
       AppRoutes.otpVerification,
       args: OtpRequest(phone: phone, purpose: OtpPurpose.changePhone),
     );
+    if (verified == true) _verifiedPhone = phone;
     return verified == true;
   }
 
@@ -60,20 +74,33 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     if (!_formKey.currentState!.validate()) return;
     final phone = _phone.text.trim();
     if (!await _verifyPhoneIfChanged(phone) || !mounted) return;
-    _profile.updateProfile(
-      _user.copyWith(
-        firstName: _firstName.text.trim(),
-        lastName: _lastName.text.trim(),
-        username: _username.text.trim(),
-        phone: phone,
-        bio: _bio.text.trim(),
-        availability: _availability,
-        city: _city,
-      ),
-    );
+    setState(() => _saving = true);
+    try {
+      // Built on the latest profile, so fields not on this form are kept.
+      await _profile.saveProfile(
+        _profile.currentUser.copyWith(
+          firstName: _firstName.text.trim(),
+          lastName: _lastName.text.trim(),
+          username: _username.text.trim(),
+          phone: phone,
+          bio: _bio.text.trim(),
+          availability: _availability,
+          city: _city,
+        ),
+        // The public profile shows the city only as now chosen.
+        locationVisible: !_keepLocationPrivate,
+      );
+    } on ProfileException catch (error) {
+      if (mounted) {
+        setState(() => _saving = false);
+        context.showMessage(error.message);
+      }
+      return;
+    }
     _profile.updateSettings(
       (current) => current.copyWith(locationVisible: !_keepLocationPrivate),
     );
+    if (!mounted) return;
     context.back();
     context.showMessage('Profile updated');
   }
@@ -81,7 +108,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   @override
   Widget build(BuildContext context) => AppPage(
     title: 'Edit profile',
-    action: SouqButton(label: 'Save', onPressed: _save),
+    action: SouqButton(
+      label: _saving ? 'Saving…' : 'Save',
+      onPressed: _saving ? null : _save,
+    ),
     children: [
       Form(
         key: _formKey,

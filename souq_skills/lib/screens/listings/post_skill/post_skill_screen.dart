@@ -4,6 +4,7 @@ import 'package:souq_skills/core/feedback.dart';
 import 'package:souq_skills/core/navigation.dart';
 import 'package:souq_skills/models/listing_kind.dart';
 import 'package:souq_skills/models/skill_post.dart';
+import 'package:souq_skills/services/listing_service.dart';
 import 'package:souq_skills/services/posting_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
 import 'package:souq_skills/widgets/skill_post_form.dart';
@@ -14,8 +15,16 @@ class PostSkillScreen extends StatelessWidget {
 
   final ListingKind initialKind;
 
-  void _publish(BuildContext context, SkillPost post) {
-    final id = PostingService().publish(post);
+  /// Only leaves the page once the listing or group has been published.
+  Future<void> _publish(BuildContext context, SkillPost post) async {
+    final String id;
+    try {
+      id = await PostingService().publish(post);
+    } on ListingException catch (error) {
+      if (context.mounted) context.showMessage(error.message);
+      return;
+    }
+    if (!context.mounted) return;
     context.resetThenOpen(
       post.isGroup ? AppRoutes.groupTradeDetails : AppRoutes.listingDetails,
       args: id,
@@ -31,6 +40,7 @@ class PostSkillScreen extends StatelessWidget {
         initial: PostingService().draft(initialKind),
         canChangeKind: true,
         submitLabel: 'Publish',
+        busyLabel: 'Publishing…',
         onSubmit: (post) => _publish(context, post),
       ),
     ],

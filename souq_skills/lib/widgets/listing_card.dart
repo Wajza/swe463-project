@@ -10,6 +10,7 @@ import 'package:souq_skills/services/review_service.dart';
 
 import 'category_icon.dart';
 import 'listing_tags.dart';
+import 'save_listing_button.dart';
 import 'status_chip.dart';
 
 class ListingCard extends StatelessWidget {
@@ -66,13 +67,9 @@ class ListingCard extends StatelessWidget {
               if (listing.isPaused)
                 const StatusChip(label: 'Paused', tone: StatusTone.waiting)
               else if (!service.isMine(listing))
-                IconButton(
-                  tooltip: listing.isSaved ? 'Remove from saved' : 'Save skill',
-                  onPressed: () => service.toggleSaved(listing.id),
-                  icon: Icon(
-                    listing.isSaved ? Icons.favorite : Icons.favorite_border,
-                    color: context.colors.primary,
-                  ),
+                SaveListingButton(
+                  listing: listing,
+                  color: context.colors.primary,
                 ),
             ],
           ),

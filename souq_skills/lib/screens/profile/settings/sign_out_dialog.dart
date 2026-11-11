@@ -13,7 +13,13 @@ abstract final class SignOutDialog {
       confirmLabel: 'Sign out',
     );
     if (!confirmed || !context.mounted) return;
-    AuthService().signOut();
+    // Signed out on this device right away, so leave even if this fails.
+    final signingOut = AuthService().signOut();
     context.resetTo(AppRoutes.welcome);
+    try {
+      await signingOut;
+    } on AuthException {
+      // The device no longer treats the member as signed in.
+    }
   }
 }

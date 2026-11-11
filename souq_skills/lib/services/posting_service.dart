@@ -43,7 +43,9 @@ class PostingService {
   );
 
   /// Publishes [post] and returns the id of the new listing or group.
-  String publish(SkillPost post) => post.isGroup
+  /// A listing is saved online first and throws a [ListingException] if
+  /// that fails; a group trade is created as before.
+  Future<String> publish(SkillPost post) async => post.isGroup
       ? GroupTradeService()
             .create(
               GroupTrade(
@@ -54,9 +56,10 @@ class PostingService {
               ),
             )
             .id
-      : ListingService().create(_applyTo(_newListing(post), post)).id;
+      : (await ListingService().create(_applyTo(_newListing(post), post))).id;
 
-  void updateListing(SkillListing listing, SkillPost post) =>
+  /// Saves [post] over [listing]. Throws a [ListingException] on failure.
+  Future<void> updateListing(SkillListing listing, SkillPost post) =>
       ListingService().update(_applyTo(listing, post));
 
   void updateGroup(GroupTrade group, SkillPost post) =>

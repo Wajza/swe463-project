@@ -1,0 +1,13 @@
+{
+  "name": "souq-skills-firestore-rules-test",
+  "private": true,
+  "description": "Firestore security rules tests. Run from souq_skills/: firebase emulators:exec --only firestore --project demo-souq-skills \"npm --prefix firestore_rules_test test\"",
+  "type": "module",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 rules.test.mjs"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
+    "firebase": "^13.2.0"
+  }
+}

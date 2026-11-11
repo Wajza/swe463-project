@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:souq_skills/core/app_routes.dart';
+import 'package:souq_skills/core/feedback.dart';
 import 'package:souq_skills/core/navigation.dart';
 import 'package:souq_skills/models/app_settings.dart';
+import 'package:souq_skills/models/otp_request.dart';
 import 'package:souq_skills/services/auth_service.dart';
 import 'package:souq_skills/services/profile_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
@@ -28,6 +30,23 @@ class SettingsScreen extends StatelessWidget {
         ProfileService().updateSettings((current) => change(current, next)),
   );
 
+  /// True while the Public profile choice is being saved.
+  static bool _savingVisibility = false;
+
+  /// Saved online first; the switch only moves once that has worked, and
+  /// taps meanwhile are ignored.
+  Future<void> _setProfileVisible(BuildContext context, bool visible) async {
+    if (_savingVisibility) return;
+    _savingVisibility = true;
+    try {
+      await ProfileService().updateVisibility(profileVisible: visible);
+    } on ProfileException catch (error) {
+      if (context.mounted) context.showMessage(error.message);
+    } finally {
+      _savingVisibility = false;
+    }
+  }
+
   Widget _link(
     BuildContext context,
     String title,
@@ -35,17 +54,50 @@ class SettingsScreen extends StatelessWidget {
     String route,
   ) => SettingsTile(title: title, icon: icon, onTap: () => context.open(route));
 
+  /// Sends a code to the member's own number and waits for it to be
+  /// verified. False if sending fails or the member goes back.
+  Future<bool> _confirmIdentity(BuildContext context) async {
+    final auth = AuthService();
+    if (!auth.needsIdentityCheck) return true;
+    try {
+      await auth.sendIdentityCode();
+    } on AuthException catch (error) {
+      if (context.mounted) context.showMessage(error.message);
+      return false;
+    }
+    if (!context.mounted) return false;
+    final verified = await context.open(
+      AppRoutes.otpVerification,
+      args: OtpRequest(
+        phone: ProfileService().currentUser.phone,
+        purpose: OtpPurpose.confirmIdentity,
+      ),
+    );
+    return verified == true;
+  }
+
   Future<void> _deleteAccount(BuildContext context) async {
     final confirmed = await ConfirmationDialog.confirm(
       context,
       title: 'Delete your account?',
-      message: 'This removes your profile, listings, credits and ratings.',
+      message:
+          'This removes your profile, listings, saved skills, blocked '
+          'members and credits. Ratings and reports already submitted '
+          'are kept.',
       confirmLabel: 'Delete',
       destructive: true,
     );
     if (!confirmed || !context.mounted) return;
-    AuthService().deleteAccount();
-    context.resetTo(AppRoutes.welcome);
+    // Online, the member verifies their number again first; nothing is
+    // deleted unless that succeeds.
+    if (!await _confirmIdentity(context) || !context.mounted) return;
+    try {
+      await AuthService().deleteAccount();
+    } on AuthException catch (error) {
+      if (context.mounted) context.showMessage(error.message);
+      return;
+    }
+    if (context.mounted) context.resetTo(AppRoutes.welcome);
   }
 
   @override
@@ -99,10 +151,10 @@ class SettingsScreen extends StatelessWidget {
           SettingsGroup(
             title: 'Privacy',
             children: [
-              _toggle(
-                'Public profile',
-                settings.profileVisible,
-                (s, v) => s.copyWith(profileVisible: v),
+              SettingsSwitchTile(
+                title: 'Public profile',
+                value: settings.profileVisible,
+                onChanged: (visible) => _setProfileVisible(context, visible),
               ),
               _link(
                 context,

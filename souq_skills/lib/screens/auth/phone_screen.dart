@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:souq_skills/core/app_routes.dart';
+import 'package:souq_skills/core/feedback.dart';
 import 'package:souq_skills/core/navigation.dart';
 import 'package:souq_skills/core/validators.dart';
 import 'package:souq_skills/models/otp_request.dart';
@@ -19,6 +20,7 @@ class PhoneScreen extends StatefulWidget {
 class _PhoneScreenState extends State<PhoneScreen> {
   final _formKey = GlobalKey<FormState>();
   final _phone = TextEditingController();
+  bool _sending = false;
 
   @override
   void dispose() {
@@ -26,9 +28,19 @@ class _PhoneScreenState extends State<PhoneScreen> {
     super.dispose();
   }
 
-  void _continue() {
+  Future<void> _continue() async {
     if (!_formKey.currentState!.validate()) return;
     final phone = _phone.text.trim();
+    setState(() => _sending = true);
+    try {
+      await AuthService().sendCode(phone);
+    } on AuthException catch (error) {
+      if (mounted) context.showMessage(error.message);
+      return;
+    } finally {
+      if (mounted) setState(() => _sending = false);
+    }
+    if (!mounted) return;
     context.open(
       AppRoutes.otpVerification,
       args: OtpRequest(
@@ -43,7 +55,10 @@ class _PhoneScreenState extends State<PhoneScreen> {
   @override
   Widget build(BuildContext context) => AppPage(
     title: 'Your phone number',
-    action: SouqButton(label: 'Continue', onPressed: _continue),
+    action: SouqButton(
+      label: _sending ? 'Sending code…' : 'Continue',
+      onPressed: _sending ? null : _continue,
+    ),
     children: [
       Form(
         key: _formKey,

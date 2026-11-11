@@ -9,7 +9,7 @@ import 'package:souq_skills/widgets/status_page.dart';
 
 import 'onboarding_screen.dart';
 
-/// Loads the saved data, then opens the app or the welcome screen.
+/// Loads the saved data and sign-in, then opens the app or the welcome screen.
 class AppGate extends StatefulWidget {
   const AppGate({super.key});
 
@@ -20,21 +20,33 @@ class AppGate extends StatefulWidget {
 class _AppGateState extends State<AppGate> {
   final _repository = Repository.instance;
   Future<void>? _restoring;
+  bool _resumed = false;
 
   @override
   void initState() {
     super.initState();
-    _startRestoring();
+    if (!_repository.isRestored) _restoring = _restore();
   }
 
-  void _startRestoring() {
-    if (_repository.isRestored) return;
-    _restoring = _repository.restore().then((_) {
+  /// Each step is skipped once done, so a retry only repeats what failed.
+  Future<void> _restore() async {
+    if (!_repository.isRestored) {
+      await Future.wait([
+        _repository.restore(),
+        AuthService().restoreSession(),
+      ]);
+    }
+    // After the saved data, which would otherwise replace the profile.
+    await AuthService().loadSessionProfile();
+    if (!_resumed) {
+      _resumed = true;
       MemberSimulator().resumePendingProposals();
-    });
+    }
   }
 
-  void _retry() => setState(_startRestoring);
+  void _retry() => setState(() {
+    _restoring = _restore();
+  });
 
   Widget _buildDestination() =>
       AuthService().isSignedIn ? const MainShell() : const OnboardingScreen();

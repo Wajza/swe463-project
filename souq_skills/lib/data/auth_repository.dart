@@ -40,12 +40,10 @@ abstract class AuthRepository {
   /// Whether the signed-in account already has a member profile.
   Future<bool> hasProfile();
 
-  /// Saves the member profile of the signed-in account.
-  Future<void> createProfile(Map<String, dynamic> profile);
-
   Future<void> signOut();
 
-  /// Removes the member profile and the sign-in account.
+  /// Removes the sign-in account. Its profile is removed separately, by the
+  /// ProfileRepository, before this is called.
   Future<void> deleteAccount();
 }
 
@@ -168,17 +166,6 @@ class FirebaseAuthRepository implements AuthRepository {
   });
 
   @override
-  Future<void> createProfile(Map<String, dynamic> profile) => _guard(() async {
-    final uid = this.uid;
-    if (uid == null) throw const AuthException(_sessionExpired);
-    await _profileOf(uid).set({
-      ...profile,
-      'id': uid,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-  });
-
-  @override
   Future<void> signOut() => _guard(() async {
     _clearPending();
     await _auth.signOut();
@@ -188,7 +175,6 @@ class FirebaseAuthRepository implements AuthRepository {
   Future<void> deleteAccount() => _guard(() async {
     final user = _auth.currentUser;
     if (user == null) throw const AuthException(_sessionExpired);
-    await _profileOf(user.uid).delete();
     await user.delete();
   });
 
@@ -271,9 +257,6 @@ class DemoAuthRepository implements AuthRepository {
   @override
   Future<bool> hasProfile() async =>
       isKnownPhone(_phone?.replaceFirst('+966', '') ?? '');
-
-  @override
-  Future<void> createProfile(Map<String, dynamic> profile) async {}
 
   @override
   Future<void> signOut() async => _phone = null;

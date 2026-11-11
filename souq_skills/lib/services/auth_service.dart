@@ -145,6 +145,20 @@ class AuthService {
     } catch (_) {}
   }
 
+  String _signedInUid() =>
+      repository.uid ??
+      (throw const AuthException('Your session has expired. Sign in again.'));
+
+  /// Runs a profile [step] for an auth flow, reporting its problems as
+  /// [AuthException]s like the rest of signing up and deleting.
+  static Future<void> _profileStep(Future<void> Function() step) async {
+    try {
+      await step();
+    } on ProfileException catch (error) {
+      throw AuthException(error.message);
+    }
+  }
+
   Future<void> _signOutQuietly() async {
     try {
       await repository.signOut();
@@ -174,7 +188,12 @@ class AuthService {
       phone: phone,
       city: city,
     );
-    await repository.createProfile(profile.toJson());
+    final profiles = AuthService.profiles;
+    if (profiles != null) {
+      // Creates the profile and claims its username in one step: if the
+      // name is taken, nothing is saved and the member can pick another.
+      await _profileStep(() => profiles.saveProfile(_signedInUid(), profile));
+    }
     createAccount(
       firstName: firstName,
       lastName: lastName,
@@ -224,6 +243,11 @@ class AuthService {
   /// Deletes the account and its profile. Throws an [AuthException] and
   /// keeps the member signed in if that fails.
   Future<void> deleteAccount() async {
+    final profiles = AuthService.profiles;
+    if (profiles != null) {
+      // While still signed in, as only the owner may remove the profile.
+      await _profileStep(() => profiles.deleteProfile(_signedInUid()));
+    }
     await repository.deleteAccount();
     _repo.hasAccount = false;
     _setSignedIn(false);

@@ -36,6 +36,9 @@ class _FakeProfiles implements ProfileRepository {
     savedUids.add(uid);
     stored = profile;
   }
+
+  @override
+  Future<void> deleteProfile(String uid) async => stored = null;
 }
 
 Finder _field(String label) => find.widgetWithText(TextFormField, label);

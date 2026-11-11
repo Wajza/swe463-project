@@ -33,6 +33,9 @@ class _FailingProfiles implements ProfileRepository {
 
   @override
   Future<void> saveProfile(String uid, User profile) async {}
+
+  @override
+  Future<void> deleteProfile(String uid) async {}
 }
 
 class _RecordingAuth extends DemoAuthRepository {

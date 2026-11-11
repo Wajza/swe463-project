@@ -36,6 +36,9 @@ class _FakeProfiles implements ProfileRepository {
     }
     stored = profile;
   }
+
+  @override
+  Future<void> deleteProfile(String uid) async => stored = null;
 }
 
 /// Signs the demo member in and opens My skills.

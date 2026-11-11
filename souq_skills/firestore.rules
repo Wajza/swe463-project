@@ -1,0 +1,111 @@
+rules_version = '2';
+
+// Souq Skills: private member profiles and unique usernames.
+//
+// users/{uid}          The member's own profile. Only they can read or write
+//                      it, so private fields such as `phone` stay private.
+// usernames/{key}      One claim per username, keyed by its trimmed,
+//                      lower-case form: { uid, username, claimedAt }.
+//
+// The app changes a profile and its claims in one transaction
+// (lib/data/profile_repository.dart), so these rules check the result of
+// the whole transaction with getAfter/existsAfter:
+//   - a profile's username must be claimed by its owner afterwards;
+//   - a claim can only be made for the name in the claimant's profile;
+//   - a rename or deletion must give up the old claim in the same write.
+// Together these keep every username held by at most one account, and let
+// each account hold only the claim for its current username.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function claimPath(key) {
+      return /databases/$(database)/documents/usernames/$(key);
+    }
+
+    function profilePath(uid) {
+      return /databases/$(database)/documents/users/$(uid);
+    }
+
+    // A username as shown in a profile (any case).
+    function isUsername(name) {
+      return name is string && name.matches('^[A-Za-z0-9_]{3,20}$');
+    }
+
+    // After this write, the caller holds the claim on [name].
+    function claimedByCaller(name) {
+      return getAfter(claimPath(name.lower())).data.uid == request.auth.uid;
+    }
+
+    // After this write, the caller holds no claim on [name]. Names that
+    // could never be claimed, and claims held by someone else (left over
+    // from before claims were enforced), need nothing released.
+    function releasedByCaller(name) {
+      return !isUsername(name)
+        || !existsAfter(claimPath(name.lower()))
+        || getAfter(claimPath(name.lower())).data.uid != request.auth.uid;
+    }
+
+    function sameUsername(before, after) {
+      return before is string && before.lower() == after.lower();
+    }
+
+    // The profile being written belongs to [uid] and holds its username.
+    function isValidProfile(uid) {
+      return request.resource.data.id == uid
+        && isUsername(request.resource.data.username)
+        && claimedByCaller(request.resource.data.username);
+    }
+
+    match /users/{uid} {
+      allow get: if isOwner(uid);
+      allow list: if false;
+
+      allow create: if isOwner(uid) && isValidProfile(uid);
+
+      allow update: if isOwner(uid)
+        && isValidProfile(uid)
+        && (sameUsername(resource.data.get('username', ''),
+                         request.resource.data.username)
+            || releasedByCaller(resource.data.get('username', '')));
+
+      allow delete: if isOwner(uid)
+        && releasedByCaller(resource.data.get('username', ''));
+    }
+
+    match /usernames/{key} {
+      // Needed to check whether a name is free. A claim only reveals the
+      // owner's uid and display username.
+      allow get: if signedIn();
+      allow list: if false;
+
+      // `create` only applies when the claim does not exist yet: writing
+      // over someone's claim is an update, which is never allowed.
+      allow create: if signedIn()
+        && key.matches('^[a-z0-9_]{3,20}$')
+        && request.resource.data.keys().hasOnly(['uid', 'username', 'claimedAt'])
+        && request.resource.data.uid == request.auth.uid
+        && isUsername(request.resource.data.username)
+        && request.resource.data.username.lower() == key
+        && request.resource.data.claimedAt == request.time
+        && getAfter(profilePath(request.auth.uid)).data.username.lower() == key;
+
+      // Claims are made and given up, never handed to another account.
+      allow update: if false;
+
+      // Only the holder can give a claim up, and not while their profile
+      // still uses the name.
+      allow delete: if signedIn()
+        && resource.data.uid == request.auth.uid
+        && (!existsAfter(profilePath(request.auth.uid))
+            || !sameUsername(getAfter(profilePath(request.auth.uid)).data.username, key));
+    }
+  }
+}

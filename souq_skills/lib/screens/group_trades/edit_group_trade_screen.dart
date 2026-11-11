@@ -22,8 +22,14 @@ class EditGroupTradeScreen extends StatelessWidget {
         SkillPostForm(
           initial: PostingService().fromGroup(group),
           submitLabel: 'Save changes',
-          onSubmit: (post) {
-            PostingService().updateGroup(group, post);
+          onSubmit: (post) async {
+            try {
+              await PostingService().updateGroup(group, post);
+            } on GroupTradeException catch (error) {
+              if (context.mounted) context.showMessage(error.message);
+              return;
+            }
+            if (!context.mounted) return;
             context.back();
             context.showMessage('Group trade updated');
           },

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:souq_skills/screens/shell/main_shell.dart';
 import 'package:souq_skills/services/auth_service.dart';
 import 'package:souq_skills/services/chat_service.dart';
+import 'package:souq_skills/services/online_groups.dart';
 import 'package:souq_skills/services/online_trades.dart';
 import 'package:souq_skills/services/online_wallet.dart';
 import 'package:souq_skills/services/member_simulator.dart';
@@ -44,6 +45,7 @@ class _AppGateState extends State<AppGate> {
     // A session restored from an earlier visit starts its chats here.
     ChatService.syncSession();
     OnlineTrades.syncSession();
+    OnlineGroups.syncSession();
     OnlineWallet.syncSession();
     if (!_resumed) {
       _resumed = true;

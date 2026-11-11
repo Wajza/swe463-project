@@ -22,6 +22,7 @@ class GroupTrade implements Identifiable {
     this.status = GroupTradeStatus.open,
     this.description = '',
     this.sessionsMinutes = 60,
+    this.confirmedIds = const [],
   });
 
   @override
@@ -35,6 +36,10 @@ class GroupTrade implements Identifiable {
   final String description;
   final int sessionsMinutes;
 
+  /// Members who confirmed the exchange happened; an online group completes
+  /// once every member has.
+  final List<String> confirmedIds;
+
   bool get isCompleted => status == GroupTradeStatus.completed;
 
   GroupTrade copyWith({
@@ -47,6 +52,7 @@ class GroupTrade implements Identifiable {
     GroupTradeStatus? status,
     String? description,
     int? sessionsMinutes,
+    List<String>? confirmedIds,
   }) => GroupTrade(
     id: id ?? this.id,
     title: title ?? this.title,
@@ -57,6 +63,7 @@ class GroupTrade implements Identifiable {
     status: status ?? this.status,
     description: description ?? this.description,
     sessionsMinutes: sessionsMinutes ?? this.sessionsMinutes,
+    confirmedIds: confirmedIds ?? this.confirmedIds,
   );
 
   Map<String, dynamic> toJson() => {
@@ -69,6 +76,7 @@ class GroupTrade implements Identifiable {
     'status': status.name,
     'description': description,
     'sessionsMinutes': sessionsMinutes,
+    'confirmedIds': confirmedIds,
   };
 
   factory GroupTrade.fromJson(Map<String, dynamic> json) => GroupTrade(
@@ -81,5 +89,7 @@ class GroupTrade implements Identifiable {
     status: GroupTradeStatus.values.byName(json['status'] as String),
     description: json['description'] as String,
     sessionsMinutes: json['sessionsMinutes'] as int,
+    // Missing from groups saved before confirmations existed.
+    confirmedIds: List<String>.from(json['confirmedIds'] as List? ?? const []),
   );
 }

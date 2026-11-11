@@ -6,6 +6,7 @@ import 'package:souq_skills/models/transaction.dart';
 
 import 'auth_service.dart';
 import 'member_service.dart';
+import 'online_groups.dart';
 import 'online_trades.dart';
 import 'repository.dart';
 
@@ -120,13 +121,20 @@ class OnlineWallet {
         'Credits received',
         TransactionType.earned,
       ),
+      WalletEntryKind.groupReward => (
+        'Group trade completed',
+        TransactionType.earned,
+      ),
     };
     return WalletTransaction(
       id: entry.id,
       title: title,
-      subtitle: entry.kind == WalletEntryKind.welcome
-          ? 'A gift for joining Souq Skills'
-          : OnlineTrades.trade(entry.tradeId)?.title ?? '',
+      subtitle: switch (entry.kind) {
+        WalletEntryKind.welcome => 'A gift for joining Souq Skills',
+        WalletEntryKind.groupReward =>
+          OnlineGroups.group(entry.groupId)?.title ?? '',
+        _ => OnlineTrades.trade(entry.tradeId)?.title ?? '',
+      },
       amount: entry.amount,
       date: entry.createdAt,
       type: type,

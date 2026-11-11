@@ -44,26 +44,28 @@ class PostingService {
 
   /// Publishes [post] and returns the id of the new listing or group.
   /// A listing is saved online first and throws a [ListingException] if
-  /// that fails; a group trade is created as before.
+  /// that fails; a group trade is created online for a signed-in real
+  /// member, throwing a [GroupTradeException] if that fails, and otherwise
+  /// on this device as before.
   Future<String> publish(SkillPost post) async => post.isGroup
-      ? GroupTradeService()
-            .create(
-              GroupTrade(
-                title: _groupTitle(post),
-                description: _groupDescription(post),
-                skills: post.skills,
-                sessionsMinutes: post.sessionsMinutes,
-              ),
-            )
-            .id
+      ? await GroupTradeService().createGroup(
+          GroupTrade(
+            title: _groupTitle(post),
+            description: _groupDescription(post),
+            skills: post.skills,
+            sessionsMinutes: post.sessionsMinutes,
+          ),
+        )
       : (await ListingService().create(_applyTo(_newListing(post), post))).id;
 
   /// Saves [post] over [listing]. Throws a [ListingException] on failure.
   Future<void> updateListing(SkillListing listing, SkillPost post) =>
       ListingService().update(_applyTo(listing, post));
 
-  void updateGroup(GroupTrade group, SkillPost post) =>
-      GroupTradeService().update(
+  /// Saves [post] over [group]: online for an online group, throwing a
+  /// [GroupTradeException] if that fails.
+  Future<void> updateGroup(GroupTrade group, SkillPost post) =>
+      GroupTradeService().save(
         group.copyWith(
           title: _groupTitle(post),
           description: _groupDescription(post),

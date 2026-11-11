@@ -39,8 +39,12 @@ rules_version = '2';
 // wallets/{uid}        Each member's credits, and their append-only ledger
 // wallets/{uid}/transactions/{entryId}  of why they changed. Only the
 //                      member can read them; balances only change through
-//                      the welcome credits or a trade completing. See the
-//                      wallet rules below.
+//                      the welcome credits, a trade completing or a
+//                      completed group trade's reward. See the wallet rules.
+// groupTrades/{groupId}  Invite-only group trades between real members, and
+// groupTrades/{groupId}/messages/{messageId}  their group chat. Only members
+//                      (and, for the group itself, invitees) can read them;
+//                      see the group trade rules below.
 //
 // Anything not matched below is denied.
 //
@@ -868,10 +872,218 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // Group trades, as written by lib/data/group_trade_repository.dart.
+    //
+    // groupTrades/{groupId}  An invite-only group of real members:
+    //   { ownerId, memberIds: [uid], invitedIds: [uid], title, description,
+    //     skills, sessionsMinutes, status, completedBy: { uid: time },
+    //     createdAt, updatedAt, updatedBy }
+    // Stored by uid only. Members and invitees can read it; nothing is
+    // deleted (the organizer cancels instead). Each change is one of:
+    //   create   by the organizer, as its only member, open
+    //   edit     the details (organizer)
+    //   invite   one real member at a time, never blocked either way
+    //            (organizer); at most maxGroupSize() members and invitees
+    //   accept, decline  an invitation (the invitee)
+    //   leave    a member who is not the organizer
+    //   remove   another member (organizer)
+    //   confirm  the caller's completedBy time; the group becomes
+    //            completed in the same write once every member (at least
+    //            two) has confirmed
+    //   cancel   (organizer)
+    // Only while open: completed and cancelled are final, so the members of
+    // a completed group never change. Each member then claims their own
+    // reward once (see the wallet rules).
+    //
+    // groupTrades/{groupId}/messages/{messageId}  The group chat:
+    //   { senderId, text, createdAt }
+    // Readable and sent by current members only; never changed or deleted.
+
+    function groupPath(groupId) {
+      return /databases/$(database)/documents/groupTrades/$(groupId);
+    }
+
+    function maxGroupSize() {
+      return 20;
+    }
+
+    function groupFields() {
+      return ['ownerId', 'memberIds', 'invitedIds', 'title', 'description',
+              'skills', 'sessionsMinutes', 'status', 'completedBy',
+              'createdAt', 'updatedAt', 'updatedBy'];
+    }
+
+    // As GroupTradeDocument.detailsOf.
+    function hasValidGroupDetails(data) {
+      return isText(data.title, 1, 100)
+        && isText(data.description, 0, 500)
+        && data.skills is list
+        && data.skills.size() >= 1 && data.skills.size() <= 10
+        && data.sessionsMinutes is int
+        && data.sessionsMinutes >= 15 && data.sessionsMinutes <= 480;
+    }
+
+    function isValidNewGroup() {
+      let data = request.resource.data;
+      return data.keys().hasOnly(groupFields())
+        && data.keys().hasAll(groupFields())
+        && data.ownerId == request.auth.uid
+        && data.memberIds == [request.auth.uid]
+        && data.invitedIds == []
+        && data.status == 'open'
+        && data.completedBy == {}
+        && hasValidGroupDetails(data)
+        && data.createdAt == request.time
+        && data.updatedAt == request.time
+        && data.updatedBy == request.auth.uid
+        && exists(profilePath(request.auth.uid));
+    }
+
+    function isGroupEdit(before, data, changed) {
+      return request.auth.uid == before.ownerId
+        && changed.hasOnly(['title', 'description', 'skills',
+                            'sessionsMinutes', 'updatedAt', 'updatedBy'])
+        && hasValidGroupDetails(data);
+    }
+
+    // One invitee, added at the end of the list.
+    function isGroupInvite(before, data, changed) {
+      let invited = data.invitedIds;
+      let invitee = invited[invited.size() - 1];
+      return request.auth.uid == before.ownerId
+        && changed.hasOnly(['invitedIds', 'updatedAt', 'updatedBy'])
+        && invited is list
+        && invited == before.invitedIds.concat([invitee])
+        && isSafeId(invitee)
+        && invitee != request.auth.uid
+        && !(invitee in before.memberIds)
+        && !(invitee in before.invitedIds)
+        && before.memberIds.size() + invited.size() <= maxGroupSize()
+        && exists(profilePath(invitee))
+        && !hasBlocked(request.auth.uid, invitee)
+        && !hasBlocked(invitee, request.auth.uid);
+    }
+
+    function isGroupJoin(before, data, changed) {
+      let caller = request.auth.uid;
+      return caller in before.invitedIds
+        && changed.hasOnly(['memberIds', 'invitedIds', 'updatedAt', 'updatedBy'])
+        && data.memberIds == before.memberIds.concat([caller])
+        && data.invitedIds == before.invitedIds.removeAll([caller]);
+    }
+
+    function isGroupDecline(before, data, changed) {
+      let caller = request.auth.uid;
+      return caller in before.invitedIds
+        && changed.hasOnly(['invitedIds', 'updatedAt', 'updatedBy'])
+        && data.invitedIds == before.invitedIds.removeAll([caller]);
+    }
+
+    // One member leaves, or the organizer removes one; the organizer never
+    // leaves. Their confirmation goes with them.
+    function isGroupMemberRemoval(before, data, changed) {
+      let removed = before.memberIds.removeAll(data.memberIds);
+      let target = removed[0];
+      let caller = request.auth.uid;
+      return changed.hasOnly(['memberIds', 'completedBy', 'updatedAt', 'updatedBy'])
+        && data.memberIds is list
+        && removed.size() == 1
+        && data.memberIds == before.memberIds.removeAll([target])
+        && target != before.ownerId
+        && (caller == target || caller == before.ownerId)
+        && data.completedBy is map
+        && data.completedBy.diff(before.completedBy).affectedKeys().hasOnly([target])
+        && !(target in data.completedBy);
+    }
+
+    // The caller confirms once; completed exactly when every member has.
+    // A member who confirmed may also complete a group whose last
+    // unconfirmed member has since left.
+    function isGroupConfirmation(before, data, changed) {
+      let ids = before.memberIds;
+      let done = data.completedBy;
+      let caller = request.auth.uid;
+      return caller in ids
+        && ids.size() >= 2
+        && changed.hasOnly(['completedBy', 'status', 'updatedAt', 'updatedBy'])
+        && done is map
+        && done.diff(before.completedBy).affectedKeys().hasOnly([caller])
+        && caller in done
+        && (caller in before.completedBy
+              ? done[caller] == before.completedBy[caller] && data.status == 'completed'
+              : done[caller] == request.time)
+        && ((done.keys().hasAll(ids) && data.status == 'completed')
+            || (!done.keys().hasAll(ids) && data.status == 'open'));
+    }
+
+    function isGroupCancel(before, data, changed) {
+      return request.auth.uid == before.ownerId
+        && changed.hasOnly(['status', 'updatedAt', 'updatedBy'])
+        && data.status == 'cancelled';
+    }
+
+    function isValidGroupUpdate() {
+      let before = resource.data;
+      let data = request.resource.data;
+      let changed = data.diff(before).affectedKeys();
+      return before.status == 'open'
+        && !changed.hasAny(['ownerId', 'createdAt'])
+        && data.keys().hasOnly(groupFields())
+        && data.updatedBy == request.auth.uid
+        && data.updatedAt == request.time
+        && (isGroupEdit(before, data, changed)
+            || isGroupInvite(before, data, changed)
+            || isGroupJoin(before, data, changed)
+            || isGroupDecline(before, data, changed)
+            || isGroupMemberRemoval(before, data, changed)
+            || isGroupConfirmation(before, data, changed)
+            || isGroupCancel(before, data, changed));
+    }
+
+    function isValidGroupMessage(groupId) {
+      let data = request.resource.data;
+      let group = get(groupPath(groupId)).data;
+      return data.keys().hasOnly(['senderId', 'text', 'createdAt'])
+        && data.keys().hasAll(['senderId', 'text', 'createdAt'])
+        && data.senderId == request.auth.uid
+        && request.auth.uid in group.memberIds
+        && group.status != 'cancelled'
+        && data.text is string
+        && data.text.size() <= 1000
+        && data.text.trim().size() > 0
+        && data.createdAt == request.time;
+    }
+
+    match /groupTrades/{groupId} {
+      // Lists must be filtered by memberIds or invitedIds containing the
+      // caller.
+      allow get, list: if signedIn()
+        && (request.auth.uid in resource.data.memberIds
+            || request.auth.uid in resource.data.invitedIds);
+
+      allow create: if signedIn() && isValidNewGroup();
+
+      allow update: if signedIn()
+        && (request.auth.uid in resource.data.memberIds
+            || request.auth.uid in resource.data.invitedIds)
+        && isValidGroupUpdate();
+
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        allow get, list: if signedIn()
+          && request.auth.uid in get(groupPath(groupId)).data.memberIds;
+
+        allow create: if signedIn() && isValidGroupMessage(groupId);
+
+        allow update, delete: if false;
+      }
+    }
+
     // Wallets, as written by lib/data/wallet_repository.dart and, when a
     // trade completes, by FirebaseTradeRepository.confirmCompletion.
     //
-    // wallets/{uid}  { uid, balance, lastTradeId?, updatedAt }
+    // wallets/{uid}  { uid, balance, lastTradeId?, lastGroupId?, updatedAt }
     //   The member's credits. Only they can read it. No one can set a
     //   balance: it is opened once with the welcome credits, and after that
     //   it only changes by exactly what a trade completing in the same
@@ -887,6 +1099,8 @@ service cloud.firestore {
     //     {tradeId}_payment  'tradePayment' (the payer, -credits) or
     //                        'tradeIncome' (the other member, +credits),
     //                        only for a trade with credits
+    //     {groupId}_groupReward  'groupReward', +groupReward(), claimed by
+    //                        each member of a completed group trade
     //
     // A trade's credits are paid by the member whose terms offered them
     // (termsBy) to the other member; both accepted those terms and both
@@ -912,6 +1126,11 @@ service cloud.firestore {
       return 10;
     }
 
+    // Each member's reward for a completed group trade.
+    function groupReward() {
+      return 15;
+    }
+
     // Trade [tradeId] goes from accepted to completed in this very write,
     // which can happen only once for each trade.
     function completesNow(tradeId) {
@@ -930,6 +1149,12 @@ service cloud.firestore {
     // wallet rules check by how much.
     function settlesWallet(uid, tradeId) {
       return getAfter(walletPath(uid)).data.get('lastTradeId', '') == tradeId;
+    }
+
+    // What a wallet may hold: lastTradeId and lastGroupId name the trade or
+    // group trade that last paid it.
+    function walletFields() {
+      return ['uid', 'balance', 'lastTradeId', 'lastGroupId', 'updatedAt'];
     }
 
     // Opened once by the owner, with the welcome credits and their entry.
@@ -951,7 +1176,7 @@ service cloud.firestore {
       let data = request.resource.data;
       let tradeId = data.get('lastTradeId', '');
       let trade = getAfter(tradePath(tradeId)).data;
-      return data.keys().hasOnly(['uid', 'balance', 'lastTradeId', 'updatedAt'])
+      return data.keys().hasOnly(walletFields())
         && data.diff(before).affectedKeys()
              .hasOnly(['balance', 'lastTradeId', 'updatedAt'])
         && data.updatedAt == request.time
@@ -966,6 +1191,44 @@ service cloud.firestore {
         && existsAfter(walletEntryPath(uid, tradeId + '_reward'))
         && (trade.creditsOffered == 0
             || existsAfter(walletEntryPath(uid, tradeId + '_payment')));
+    }
+
+    // The member's own reward for group trade lastGroupId, which completed
+    // with them as a member: once, with its entry created in this write
+    // (see isGroupRewardEntry).
+    function isGroupRewardClaim(uid) {
+      let before = resource.data;
+      let data = request.resource.data;
+      let groupId = data.get('lastGroupId', '');
+      let entry = walletEntryPath(uid, groupId + '_groupReward');
+      return isOwner(uid)
+        && data.keys().hasOnly(walletFields())
+        && data.diff(before).affectedKeys()
+             .hasOnly(['balance', 'lastGroupId', 'updatedAt'])
+        && data.updatedAt == request.time
+        && isSafeId(groupId)
+        && before.balance is int
+        && data.balance is int
+        && data.balance == before.balance + groupReward()
+        && !exists(entry)
+        && existsAfter(entry);
+    }
+
+    function isGroupRewardEntry(uid, entryId, data) {
+      let groupId = data.groupId;
+      let group = get(groupPath(groupId)).data;
+      return isOwner(uid)
+        && data.keys().hasOnly(['kind', 'amount', 'groupId', 'createdAt'])
+        && data.keys().hasAll(['kind', 'amount', 'groupId', 'createdAt'])
+        && isSafeId(groupId)
+        && entryId == groupId + '_groupReward'
+        && data.kind == 'groupReward'
+        && data.amount == groupReward()
+        && group.status == 'completed'
+        && uid in group.memberIds
+        && getAfter(walletPath(uid)).data.get('lastGroupId', '') == groupId
+        && getAfter(walletPath(uid)).data.balance
+             == get(walletPath(uid)).data.balance + groupReward();
     }
 
     function isWelcomeEntry(uid, data) {
@@ -1005,7 +1268,9 @@ service cloud.firestore {
         && data.amount is int
         && (entryId == 'welcome'
             ? isWelcomeEntry(uid, data)
-            : isTradeEntry(uid, entryId, data));
+            : (data.keys().hasAny(['groupId'])
+                ? isGroupRewardEntry(uid, entryId, data)
+                : isTradeEntry(uid, entryId, data)));
     }
 
     match /wallets/{uid} {
@@ -1014,8 +1279,10 @@ service cloud.firestore {
 
       allow create: if isOwner(uid) && isNewWallet(uid);
 
-      // Never by the member choosing a balance: only a trade's settlement.
-      allow update: if signedIn() && isWalletSettlement(uid);
+      // Never by the member choosing a balance: only a trade's settlement
+      // or the member's reward for a completed group trade.
+      allow update: if signedIn()
+        && (isWalletSettlement(uid) || isGroupRewardClaim(uid));
 
       allow delete: if false;
 

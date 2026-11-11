@@ -1,5 +1,6 @@
 // Firestore security rules tests for Souq Skills profiles, usernames,
-// listings, blocks, reports, reviews, chats, trades and wallets.
+// listings, blocks, reports, reviews, chats, trades, wallets and group
+// trades.
 //
 // Run from souq_skills/ (starts and stops the emulator, deploys nothing):
 //   firebase emulators:exec --only firestore --project demo-souq-skills \
@@ -21,8 +22,10 @@ import {
   initializeTestEnvironment,
 } from '@firebase/rules-unit-testing';
 import {
+  addDoc,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   documentId,
   getDoc,
@@ -2949,5 +2952,373 @@ describe('wallets: what the rules must refuse', () => {
     await assertFails(confirm(dbAs(OTHER), OTHER, sent.tradeId));
     assert.equal(await balanceOf(OTHER), WELCOME);
     assert.equal(await balanceOf(THIRD), WELCOME);
+  });
+});
+
+// Group trades: groupTrades/{groupId} and its messages. The helpers make
+// exactly the writes of FirebaseGroupTradeRepository in
+// lib/data/group_trade_repository.dart.
+
+const FOURTH = 'uid-noura';
+const GROUP_REWARD = 15;
+
+const groupRef = (db, groupId) => doc(db, 'groupTrades', groupId);
+
+const groupDetails = (extra = {}) => ({
+  title: 'Design skill circle',
+  description: 'A group exchange around Figma.',
+  skills: ['Figma'],
+  sessionsMinutes: 60,
+  ...extra,
+});
+
+/// Mirrors create. Resolves to the new group's id.
+async function createGroup(db, uid, extra = {}) {
+  const ref = doc(collection(db, 'groupTrades'));
+  await setDoc(ref, {
+    ownerId: uid,
+    memberIds: [uid],
+    invitedIds: [],
+    ...groupDetails(),
+    status: 'open',
+    completedBy: {},
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+    ...extra,
+  });
+  return ref.id;
+}
+
+/// Mirrors _change: [change] works out the update from the stored group.
+const changeGroup = (db, uid, groupId, change) =>
+  runTransaction(db, async (transaction) => {
+    const ref = groupRef(db, groupId);
+    const group = (await transaction.get(ref)).data();
+    transaction.update(ref, { ...change(group), updatedAt: serverTimestamp(), updatedBy: uid });
+  });
+
+const inviteToGroup = (db, uid, groupId, memberUid) =>
+  changeGroup(db, uid, groupId, (group) => ({ invitedIds: [...group.invitedIds, memberUid] }));
+
+const answerInvitation = (db, uid, groupId, accept) =>
+  changeGroup(db, uid, groupId, (group) => ({
+    ...(accept ? { memberIds: [...group.memberIds, uid] } : {}),
+    invitedIds: group.invitedIds.filter((id) => id !== uid),
+  }));
+
+const removeFromGroup = (db, uid, groupId, memberUid) =>
+  changeGroup(db, uid, groupId, (group) => ({
+    memberIds: group.memberIds.filter((id) => id !== memberUid),
+    [`completedBy.${memberUid}`]: deleteField(),
+  }));
+
+/// Mirrors confirmCompletion. [status] forces the stored status.
+const confirmGroup = (db, uid, groupId, { status } = {}) =>
+  changeGroup(db, uid, groupId, (group) => {
+    const had = uid in group.completedBy;
+    const confirmed = new Set([...Object.keys(group.completedBy), uid]);
+    const done = group.memberIds.every((id) => confirmed.has(id));
+    return {
+      ...(had ? {} : { [`completedBy.${uid}`]: serverTimestamp() }),
+      ...(status ? { status } : done ? { status: 'completed' } : {}),
+    };
+  });
+
+const cancelGroup = (db, uid, groupId) => changeGroup(db, uid, groupId, () => ({ status: 'cancelled' }));
+
+const sendToGroup = (db, uid, groupId, text = 'Hello group', extra = {}) =>
+  addDoc(collection(db, 'groupTrades', groupId, 'messages'), {
+    senderId: uid,
+    text,
+    createdAt: serverTimestamp(),
+    ...extra,
+  });
+
+/// Mirrors FirebaseWalletRepository.claimGroupReward. [amount] changes the
+/// reward, for what must be refused.
+async function claimGroupReward(db, uid, groupId, { amount = GROUP_REWARD, walletUid = uid } = {}) {
+  await openWallet(db, uid);
+  return runTransaction(db, async (transaction) => {
+    const entry = entryRef(db, walletUid, `${groupId}_groupReward`);
+    if ((await transaction.get(entry)).exists()) return;
+    transaction.update(walletRef(db, walletUid), {
+      balance: increment(amount),
+      lastGroupId: groupId,
+      updatedAt: serverTimestamp(),
+    });
+    transaction.set(entry, { kind: 'groupReward', amount, groupId, createdAt: serverTimestamp() });
+  });
+}
+
+async function fetchGroupIds(db, uid, field = 'memberIds') {
+  const snapshot = await getDocs(
+    query(collection(db, 'groupTrades'), where(field, 'array-contains', uid), limit(200)),
+  );
+  return snapshot.docs.map((item) => item.id);
+}
+
+/// An open group by ME with OTHER and THIRD as members.
+async function groupOfThree() {
+  await seedAccounts(ME, OTHER, THIRD, FOURTH);
+  const groupId = await createGroup(dbAs(ME), ME);
+  for (const uid of [OTHER, THIRD]) {
+    await inviteToGroup(dbAs(ME), ME, groupId, uid);
+    await answerInvitation(dbAs(uid), uid, groupId, true);
+  }
+  return groupId;
+}
+
+describe('group trades: what the rules must allow', () => {
+  test('the organizer creates and invites; the invitee reads and joins', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+    const groupId = await assertSucceeds(createGroup(dbAs(ME), ME));
+    await assertSucceeds(inviteToGroup(dbAs(ME), ME, groupId, OTHER));
+
+    assert.deepEqual(await fetchGroupIds(dbAs(OTHER), OTHER, 'invitedIds'), [groupId]);
+    await assertSucceeds(getDoc(groupRef(dbAs(OTHER), groupId)));
+    await assertFails(getDoc(groupRef(dbAs(THIRD), groupId)));
+    await assertFails(getDocs(collection(dbAs(THIRD), 'groupTrades')));
+
+    await assertSucceeds(answerInvitation(dbAs(OTHER), OTHER, groupId, true));
+    const stored = await read(`groupTrades/${groupId}`);
+    assert.deepEqual(stored.memberIds, [ME, OTHER]);
+    assert.deepEqual(stored.invitedIds, []);
+    assert.deepEqual(await fetchGroupIds(dbAs(OTHER), OTHER), [groupId]);
+  });
+
+  test('declining, leaving, removing, editing and cancelling', async () => {
+    const groupId = await groupOfThree();
+    await inviteToGroup(dbAs(ME), ME, groupId, FOURTH);
+    await assertSucceeds(answerInvitation(dbAs(FOURTH), FOURTH, groupId, false));
+    await assertFails(getDoc(groupRef(dbAs(FOURTH), groupId)));
+
+    await confirmGroup(dbAs(THIRD), THIRD, groupId);
+    await assertSucceeds(removeFromGroup(dbAs(ME), ME, groupId, THIRD));
+    const stored = await read(`groupTrades/${groupId}`);
+    assert.deepEqual(stored.memberIds, [ME, OTHER]);
+    assert.deepEqual(stored.completedBy, {}, 'their confirmation goes with them');
+
+    await assertSucceeds(removeFromGroup(dbAs(OTHER), OTHER, groupId, OTHER));
+    await assertSucceeds(changeGroup(dbAs(ME), ME, groupId, () => groupDetails({ title: 'Renamed', skills: ['Figma', 'UI'] })));
+    await assertSucceeds(cancelGroup(dbAs(ME), ME, groupId));
+    assert.equal((await read(`groupTrades/${groupId}`)).status, 'cancelled');
+  });
+
+  test('every member confirms, then each claims their reward once', async () => {
+    const groupId = await groupOfThree();
+    await assertSucceeds(confirmGroup(dbAs(ME), ME, groupId));
+    await assertSucceeds(confirmGroup(dbAs(OTHER), OTHER, groupId));
+    assert.equal((await read(`groupTrades/${groupId}`)).status, 'open');
+    await assertSucceeds(confirmGroup(dbAs(THIRD), THIRD, groupId));
+    assert.equal((await read(`groupTrades/${groupId}`)).status, 'completed');
+
+    for (const uid of [ME, OTHER, THIRD]) {
+      await assertSucceeds(claimGroupReward(dbAs(uid), uid, groupId));
+      // Claiming again finds the entry and does nothing.
+      await assertSucceeds(claimGroupReward(dbAs(uid), uid, groupId));
+      assert.equal(await balanceOf(uid), WELCOME + GROUP_REWARD);
+      const entry = (await ledgerOf(uid))[`${groupId}_groupReward`];
+      assert.deepEqual([entry.kind, entry.amount, entry.groupId], ['groupReward', GROUP_REWARD, groupId]);
+    }
+  });
+
+  test('a member who confirmed completes the group once the last one left', async () => {
+    const groupId = await groupOfThree();
+    await confirmGroup(dbAs(ME), ME, groupId);
+    await confirmGroup(dbAs(OTHER), OTHER, groupId);
+    await removeFromGroup(dbAs(THIRD), THIRD, groupId, THIRD);
+    await assertSucceeds(confirmGroup(dbAs(OTHER), OTHER, groupId));
+    assert.equal((await read(`groupTrades/${groupId}`)).status, 'completed');
+  });
+
+  test('members chat; the chat is theirs alone', async () => {
+    const groupId = await groupOfThree();
+    await inviteToGroup(dbAs(ME), ME, groupId, FOURTH);
+    await assertSucceeds(sendToGroup(dbAs(OTHER), OTHER, groupId));
+    await assertSucceeds(getDocs(collection(dbAs(THIRD), 'groupTrades', groupId, 'messages')));
+    await assertFails(getDocs(collection(dbAs(FOURTH), 'groupTrades', groupId, 'messages')));
+    await assertFails(sendToGroup(dbAs(FOURTH), FOURTH, groupId));
+  });
+});
+
+describe('group trades: what the rules must refuse', () => {
+  test('creating a group for someone else, with members, or not open', async () => {
+    await seedAccounts(ME, OTHER);
+    await assertFails(createGroup(dbAs(ME), OTHER, { updatedBy: ME }));
+    await assertFails(createGroup(dbAs(ME), ME, { memberIds: [ME, OTHER] }));
+    await assertFails(createGroup(dbAs(ME), ME, { invitedIds: [OTHER] }));
+    await assertFails(createGroup(dbAs(ME), ME, { status: 'completed' }));
+    await assertFails(createGroup(dbAs(ME), ME, { completedBy: { [ME]: new Date() } }));
+    await assertFails(createGroup(dbAs(ME), ME, { skills: [] }));
+    await assertFails(createGroup(dbAs(ME), ME, { extra: true }));
+    // Without an account.
+    await assertFails(createGroup(dbAs(THIRD), THIRD));
+  });
+
+  test('inviting by anyone but the organizer, oneself, twice or the unknown', async () => {
+    const groupId = await groupOfThree();
+    await assertFails(inviteToGroup(dbAs(OTHER), OTHER, groupId, FOURTH));
+    await assertFails(inviteToGroup(dbAs(ME), ME, groupId, ME));
+    await assertFails(inviteToGroup(dbAs(ME), ME, groupId, OTHER));
+    await assertFails(inviteToGroup(dbAs(ME), ME, groupId, 'uid-nobody'));
+    await assertFails(inviteToGroup(dbAs(ME), ME, groupId, 'm-sami'));
+    await assertFails(
+      changeGroup(dbAs(ME), ME, groupId, (group) => ({ invitedIds: [...group.invitedIds, FOURTH, 'uid-x'] })),
+    );
+    // Straight into the members.
+    await assertFails(changeGroup(dbAs(ME), ME, groupId, (group) => ({ memberIds: [...group.memberIds, FOURTH] })));
+    await assertSucceeds(inviteToGroup(dbAs(ME), ME, groupId, FOURTH));
+    await assertFails(inviteToGroup(dbAs(ME), ME, groupId, FOURTH));
+  });
+
+  test('inviting a member who blocked the organizer, or was blocked', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+    const groupId = await createGroup(dbAs(ME), ME);
+    await seed({
+      [`users/${OTHER}/blocked/${ME}`]: { blockedUid: ME, blockedAt: new Date() },
+      [`users/${ME}/blocked/${THIRD}`]: { blockedUid: THIRD, blockedAt: new Date() },
+    });
+    await assertFails(inviteToGroup(dbAs(ME), ME, groupId, OTHER));
+    await assertFails(inviteToGroup(dbAs(ME), ME, groupId, THIRD));
+  });
+
+  test('inviting past the size limit', async () => {
+    await seedAccounts(ME, OTHER);
+    const groupId = await createGroup(dbAs(ME), ME);
+    const invited = Array.from({ length: 19 }, (_, i) => `uid-invited-${i}`);
+    await env.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(groupRef(context.firestore(), groupId), { invitedIds: invited });
+    });
+    await assertFails(inviteToGroup(dbAs(ME), ME, groupId, OTHER));
+  });
+
+  test('joining uninvited, for someone else, or declining for them', async () => {
+    const groupId = await groupOfThree();
+    await assertFails(answerInvitation(dbAs(FOURTH), FOURTH, groupId, true));
+    await inviteToGroup(dbAs(ME), ME, groupId, FOURTH);
+    await assertFails(
+      changeGroup(dbAs(OTHER), OTHER, groupId, (group) => ({
+        memberIds: [...group.memberIds, FOURTH],
+        invitedIds: [],
+      })),
+    );
+    await assertFails(changeGroup(dbAs(OTHER), OTHER, groupId, () => ({ invitedIds: [] })));
+    // An invitee may only add themselves.
+    await assertFails(
+      changeGroup(dbAs(FOURTH), FOURTH, groupId, (group) => ({
+        memberIds: [...group.memberIds, FOURTH, 'uid-x'],
+        invitedIds: [],
+      })),
+    );
+  });
+
+  test('the organizer leaving, or members removing each other', async () => {
+    const groupId = await groupOfThree();
+    await assertFails(removeFromGroup(dbAs(ME), ME, groupId, ME));
+    await assertFails(removeFromGroup(dbAs(OTHER), OTHER, groupId, THIRD));
+    await assertFails(removeFromGroup(dbAs(OTHER), OTHER, groupId, ME));
+    await assertFails(
+      changeGroup(dbAs(ME), ME, groupId, () => ({ memberIds: [ME] })),
+    );
+  });
+
+  test('completing early, for someone else, alone or twice', async () => {
+    const groupId = await groupOfThree();
+    await assertFails(confirmGroup(dbAs(ME), ME, groupId, { status: 'completed' }));
+    await assertFails(
+      changeGroup(dbAs(ME), ME, groupId, () => ({ [`completedBy.${OTHER}`]: serverTimestamp() })),
+    );
+    await assertFails(confirmGroup(dbAs(FOURTH), FOURTH, groupId));
+    // (The organizer writing the same again counts as an empty edit, which
+    // changes nothing.)
+    await confirmGroup(dbAs(OTHER), OTHER, groupId);
+    await assertFails(confirmGroup(dbAs(OTHER), OTHER, groupId));
+
+    await env.clearFirestore();
+    await seedAccounts(ME);
+    const alone = await createGroup(dbAs(ME), ME);
+    await assertFails(confirmGroup(dbAs(ME), ME, alone));
+  });
+
+  test('changing a completed or cancelled group, or deleting one', async () => {
+    const groupId = await groupOfThree();
+    for (const uid of [ME, OTHER, THIRD]) await confirmGroup(dbAs(uid), uid, groupId);
+    await assertFails(inviteToGroup(dbAs(ME), ME, groupId, FOURTH));
+    await assertFails(removeFromGroup(dbAs(OTHER), OTHER, groupId, OTHER));
+    await assertFails(removeFromGroup(dbAs(ME), ME, groupId, THIRD));
+    await assertFails(changeGroup(dbAs(ME), ME, groupId, () => groupDetails({ title: 'Later' })));
+    await assertFails(cancelGroup(dbAs(ME), ME, groupId));
+    await assertFails(changeGroup(dbAs(ME), ME, groupId, () => ({ status: 'open' })));
+    await assertFails(deleteDoc(groupRef(dbAs(ME), groupId)));
+
+    await env.clearFirestore();
+    const cancelled = await groupOfThree();
+    await assertFails(cancelGroup(dbAs(OTHER), OTHER, cancelled));
+    await cancelGroup(dbAs(ME), ME, cancelled);
+    await assertFails(confirmGroup(dbAs(ME), ME, cancelled));
+    await assertFails(sendToGroup(dbAs(OTHER), OTHER, cancelled));
+  });
+
+  test('rewards before completion, for non-members, twice or for more', async () => {
+    const groupId = await groupOfThree();
+    await inviteToGroup(dbAs(ME), ME, groupId, FOURTH);
+    await assertFails(claimGroupReward(dbAs(ME), ME, groupId), 'not completed yet');
+    await removeFromGroup(dbAs(THIRD), THIRD, groupId, THIRD);
+    await confirmGroup(dbAs(ME), ME, groupId);
+    await confirmGroup(dbAs(OTHER), OTHER, groupId);
+
+    await assertFails(claimGroupReward(dbAs(THIRD), THIRD, groupId), 'left before it completed');
+    await assertFails(claimGroupReward(dbAs(FOURTH), FOURTH, groupId), 'only invited');
+    await assertFails(claimGroupReward(dbAs(ME), ME, groupId, { amount: 100 }));
+    await assertFails(claimGroupReward(dbAs(ME), ME, groupId, { walletUid: OTHER }));
+    await assertSucceeds(claimGroupReward(dbAs(ME), ME, groupId));
+
+    // Again, written directly instead of finding the entry.
+    const db = dbAs(ME);
+    await assertFails(
+      runTransaction(db, async (transaction) => {
+        transaction.update(walletRef(db, ME), { balance: increment(GROUP_REWARD), lastGroupId: groupId, updatedAt: serverTimestamp() });
+        transaction.set(entryRef(db, ME, `${groupId}_groupReward`), {
+          kind: 'groupReward', amount: GROUP_REWARD, groupId, createdAt: serverTimestamp(),
+        });
+      }),
+    );
+    // A reward without its entry, or under another id.
+    await assertFails(updateDoc(walletRef(db, ME), { balance: increment(GROUP_REWARD), lastGroupId: 'another', updatedAt: serverTimestamp() }));
+    await assertFails(
+      setDoc(entryRef(db, ME, `${groupId}_bonus`), { kind: 'groupReward', amount: GROUP_REWARD, groupId, createdAt: serverTimestamp() }),
+    );
+    assert.equal(await balanceOf(ME), WELCOME + GROUP_REWARD);
+    assert.equal(await balanceOf(THIRD), WELCOME);
+    assert.equal(await balanceOf(FOURTH), WELCOME);
+  });
+
+  test('a group reward cannot pay a trade, nor a trade a group reward', async () => {
+    const sent = await creditTrade(ME, OTHER, 30);
+    await confirm(dbAs(ME), ME, sent.tradeId);
+    // The trade's completion with lastGroupId changed as well.
+    await assertFails(
+      confirm(dbAs(OTHER), OTHER, sent.tradeId, {
+        tamper: (members) => members.map((m) => ({ ...m, delta: m.delta + GROUP_REWARD })),
+      }),
+    );
+    await assertSucceeds(confirm(dbAs(OTHER), OTHER, sent.tradeId));
+    assert.equal(await balanceOf(OTHER), WELCOME + REWARD + 30);
+  });
+
+  test('impersonating, empty, changed or deleted group messages', async () => {
+    const groupId = await groupOfThree();
+    await assertFails(sendToGroup(dbAs(OTHER), ME, groupId));
+    await assertFails(sendToGroup(dbAs(OTHER), OTHER, groupId, '   '));
+    await assertFails(sendToGroup(dbAs(OTHER), OTHER, groupId, 'x'.repeat(1001)));
+    await assertFails(sendToGroup(dbAs(OTHER), OTHER, groupId, 'Hi', { kind: 'system' }));
+    const sent = await sendToGroup(dbAs(OTHER), OTHER, groupId);
+    await assertFails(updateDoc(doc(dbAs(OTHER), sent.path), { text: 'Changed' }));
+    await assertFails(deleteDoc(doc(dbAs(OTHER), sent.path)));
+
+    await removeFromGroup(dbAs(THIRD), THIRD, groupId, THIRD);
+    await assertFails(sendToGroup(dbAs(THIRD), THIRD, groupId));
+    await assertFails(getDocs(collection(dbAs(THIRD), 'groupTrades', groupId, 'messages')));
   });
 });

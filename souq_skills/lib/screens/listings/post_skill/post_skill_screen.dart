@@ -4,6 +4,7 @@ import 'package:souq_skills/core/feedback.dart';
 import 'package:souq_skills/core/navigation.dart';
 import 'package:souq_skills/models/listing_kind.dart';
 import 'package:souq_skills/models/skill_post.dart';
+import 'package:souq_skills/services/group_trade_service.dart';
 import 'package:souq_skills/services/listing_service.dart';
 import 'package:souq_skills/services/posting_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
@@ -21,6 +22,9 @@ class PostSkillScreen extends StatelessWidget {
     try {
       id = await PostingService().publish(post);
     } on ListingException catch (error) {
+      if (context.mounted) context.showMessage(error.message);
+      return;
+    } on GroupTradeException catch (error) {
       if (context.mounted) context.showMessage(error.message);
       return;
     }

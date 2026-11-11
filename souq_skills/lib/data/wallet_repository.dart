@@ -17,13 +17,22 @@ class WalletException implements Exception {
   static const notLoaded = WalletException(
     'We could not load your wallet. Try again.',
   );
+  static const rewardNotAdded = WalletException(
+    'Your group trade reward could not be added. Try again.',
+  );
 
   @override
   String toString() => message;
 }
 
 /// Why a member's credits changed, as stored in their ledger.
-enum WalletEntryKind { welcome, tradeReward, tradePayment, tradeIncome }
+enum WalletEntryKind {
+  welcome,
+  tradeReward,
+  tradePayment,
+  tradeIncome,
+  groupReward,
+}
 
 /// One entry of a member's ledger, `wallets/{uid}/transactions/{id}`.
 class WalletEntry {
@@ -34,6 +43,7 @@ class WalletEntry {
     required this.createdAt,
     this.tradeId,
     this.counterpartyId,
+    this.groupId,
   });
 
   final String id;
@@ -46,6 +56,9 @@ class WalletEntry {
 
   /// The other member of the trade, as a uid.
   final String? counterpartyId;
+
+  /// The group trade of a [WalletEntryKind.groupReward].
+  final String? groupId;
 }
 
 /// What completing a trade pays one of its members: the change to their
@@ -68,7 +81,8 @@ class WalletSettlement {
 /// append-only ledger of why it changed. Only the member can read either.
 /// A wallet is opened once with the welcome credits; after that it changes
 /// only when one of the member's trades completes, in the same write
-/// (see [TradeRepository.confirmCompletion]), as the Firestore rules check.
+/// (see [TradeRepository.confirmCompletion]), or when the member claims
+/// their reward for a completed group trade, as the Firestore rules check.
 abstract class WalletRepository {
   /// Opens [uid]'s wallet with the welcome credits, unless it is open
   /// already. Throws a [WalletException].
@@ -88,11 +102,25 @@ abstract class WalletRepository {
 abstract final class WalletDocument {
   static const welcomeCredits = 120;
   static const completionReward = 10;
+
+  /// Each member's reward for a completed group trade.
+  static const groupReward = 15;
   static const fetchLimit = 200;
 
   static const welcomeId = 'welcome';
   static String rewardId(String tradeId) => '${tradeId}_reward';
   static String paymentId(String tradeId) => '${tradeId}_payment';
+  static String groupRewardId(String groupId) => '${groupId}_groupReward';
+
+  static Map<String, dynamic> groupRewardEntryData(
+    String groupId,
+    Object now,
+  ) => {
+    'kind': WalletEntryKind.groupReward.name,
+    'amount': groupReward,
+    'groupId': groupId,
+    'createdAt': now,
+  };
 
   static Map<String, dynamic> newWalletData(String uid, Object now) => {
     'uid': uid,
@@ -183,6 +211,7 @@ abstract final class WalletDocument {
     if (kind == null || amount is! int) return null;
     final tradeId = data['tradeId'];
     final counterparty = data['counterpartyId'];
+    final groupId = data['groupId'];
     return WalletEntry(
       id: id,
       kind: kind,
@@ -190,6 +219,7 @@ abstract final class WalletDocument {
       createdAt: TradeDocument.dateOf(data['createdAt']),
       tradeId: tradeId is String ? tradeId : null,
       counterpartyId: counterparty is String ? counterparty : null,
+      groupId: groupId is String ? groupId : null,
     );
   }
 
@@ -230,6 +260,33 @@ class FirebaseWalletRepository implements WalletRepository {
       throw error.code == 'unavailable'
           ? WalletException.offline
           : WalletException.notLoaded;
+    }
+  }
+
+  /// Adds [uid]'s reward for completed group trade [groupId] to their
+  /// wallet, once: nothing happens if it was claimed already. The rules
+  /// refuse it unless [uid] is a member of the completed group. Throws a
+  /// [WalletException].
+  Future<void> claimGroupReward(String uid, String groupId) async {
+    await openWallet(uid);
+    final ref = wallet(uid);
+    final entry = _entry(uid, WalletDocument.groupRewardId(groupId));
+    try {
+      await _firestore.runTransaction((transaction) async {
+        if ((await transaction.get(entry)).exists) return;
+        final now = FieldValue.serverTimestamp();
+        transaction
+          ..update(ref, {
+            'balance': FieldValue.increment(WalletDocument.groupReward),
+            'lastGroupId': groupId,
+            'updatedAt': now,
+          })
+          ..set(entry, WalletDocument.groupRewardEntryData(groupId, now));
+      });
+    } on FirebaseException catch (error) {
+      throw error.code == 'unavailable'
+          ? WalletException.offline
+          : WalletException.rewardNotAdded;
     }
   }
 
@@ -317,6 +374,33 @@ class DemoWalletRepository implements WalletRepository {
     _entries[uid] = {
       WalletDocument.welcomeId: WalletDocument.welcomeEntryData(now),
     };
+    _changes.add(null);
+  }
+
+  /// Adds [uid]'s reward for group trade [groupId] once, as the rules
+  /// allow only when [isCompletedMember]: [uid] is a member of the group,
+  /// and it is completed. Nothing happens if it was claimed already.
+  Future<void> claimGroupReward(
+    String uid,
+    String groupId, {
+    required bool isCompletedMember,
+  }) async {
+    await openWallet(uid);
+    final id = WalletDocument.groupRewardId(groupId);
+    if (_entries[uid]?.containsKey(id) ?? false) return;
+    if (!isCompletedMember) throw WalletException.rewardNotAdded;
+    final now = DateTime.now();
+    final wallet = _wallets[uid]!;
+    _wallets[uid] = {
+      ...wallet,
+      'balance': (wallet['balance'] as int) + WalletDocument.groupReward,
+      'lastGroupId': groupId,
+      'updatedAt': now,
+    };
+    (_entries[uid] ??= {})[id] = WalletDocument.groupRewardEntryData(
+      groupId,
+      now,
+    );
     _changes.add(null);
   }
 

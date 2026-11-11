@@ -4,10 +4,12 @@ import 'package:souq_skills/core/navigation.dart';
 import 'package:souq_skills/models/group_trade.dart';
 import 'package:souq_skills/models/listing_kind.dart';
 import 'package:souq_skills/services/group_trade_service.dart';
+import 'package:souq_skills/services/online_groups.dart';
 import 'package:souq_skills/widgets/app_page.dart';
 import 'package:souq_skills/widgets/choice_chip_row.dart';
 import 'package:souq_skills/widgets/empty_state.dart';
 import 'package:souq_skills/widgets/group_trade_card.dart';
+import 'package:souq_skills/widgets/listings_load_error.dart';
 import 'package:souq_skills/widgets/live_view.dart';
 
 enum _GroupFilter {
@@ -58,15 +60,35 @@ class _GroupTradesListScreenState extends State<GroupTradesListScreen> {
       LiveView(
         builder: (_) {
           final groups = GroupTradeService().all().where(_matches);
-          if (groups.isEmpty) {
-            return const EmptyState(
-              title: 'No group trades',
-              message: 'Groups are invite only. Create one with the + button.',
-              icon: Icons.groups_outlined,
-            );
-          }
+          final error = OnlineGroups.loadError;
+          // Online groups that have not arrived yet.
+          final loading =
+              OnlineGroups.isAvailable &&
+              !OnlineGroups.isLoaded &&
+              error == null;
           return Column(
             children: [
+              if (error != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: ListingsLoadError(
+                    title: 'Could not load group trades',
+                    message: error,
+                    onRetry: OnlineGroups.retry,
+                  ),
+                ),
+              if (loading)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else if (groups.isEmpty)
+                const EmptyState(
+                  title: 'No group trades',
+                  message:
+                      'Groups are invite only. Create one with the + button.',
+                  icon: Icons.groups_outlined,
+                ),
               for (final group in groups) GroupTradeCard(group: group),
             ],
           );

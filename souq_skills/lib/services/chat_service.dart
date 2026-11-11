@@ -12,6 +12,7 @@ import 'auth_service.dart';
 import 'member_service.dart';
 import 'member_simulator.dart';
 import 'notification_service.dart';
+import 'online_groups.dart';
 import 'repository.dart';
 import 'safety_service.dart';
 
@@ -33,8 +34,9 @@ class ChatLoadState {
 }
 
 /// Chats with real members are kept online and arrive live while the
-/// member is signed in; chats with the built-in demo members, group chats
-/// and the offline demo stay on this device, as before. A conversation's
+/// member is signed in, and so do the chats of online group trades
+/// ([OnlineGroups]); chats with the built-in demo members, their group
+/// chats and the offline demo stay on this device, as before. A conversation's
 /// id in the app is the other member's id, or [groupConversationId].
 class ChatService {
   static const _groupPrefix = 'group:';
@@ -158,7 +160,9 @@ class ChatService {
     final local = _repo.messages
         .where((message) => message.conversationId == conversationId)
         .toList();
-    final online = _onlineMessages(conversationId);
+    final online = conversationId.startsWith(_groupPrefix)
+        ? _onlineGroupMessages(conversationId)
+        : _onlineMessages(conversationId);
     if (online.isEmpty) return local;
     return ChatDocument.oldestFirst([...online, ...local]);
   }
@@ -169,7 +173,11 @@ class ChatService {
       threads.putIfAbsent(message.conversationId, () => []).add(message);
     }
     final result = <Conversation>[];
-    for (final id in {...threads.keys, ..._conversations.keys}) {
+    for (final id in {
+      ...threads.keys,
+      ..._conversations.keys,
+      ...OnlineGroups.chatGroupIds().map(groupConversationId),
+    }) {
       final conversation = _summarize(id, threads[id] ?? const []);
       if (conversation != null) result.add(conversation);
     }
@@ -215,8 +223,19 @@ class ChatService {
     tradeId: tradeId,
   );
 
-  void sendToGroup(String groupId, String text) =>
-      post(groupConversationId(groupId), text);
+  /// Sends [text] to group [groupId]'s chat: online for an online group,
+  /// throwing a [ChatException] if it was not sent.
+  Future<void> sendToGroup(String groupId, String text) async {
+    if (OnlineGroups.group(groupId) == null) {
+      return post(groupConversationId(groupId), text);
+    }
+    try {
+      final (online, uid) = OnlineGroups.signedIn();
+      await online.sendMessage(uid, groupId, text);
+    } on GroupTradeException catch (error) {
+      throw ChatException(error.message);
+    }
+  }
 
   /// Adds a message written by the current user on this device.
   void post(String conversationId, String text, {String? proposalId}) =>
@@ -408,6 +427,22 @@ class ChatService {
     }
   }
 
+  /// The messages of an online group's chat [conversationId], with each
+  /// sender's name. Group chats have no read times, so they count as read.
+  List<Message> _onlineGroupMessages(String conversationId) => [
+    for (final message in OnlineGroups.messages(
+      conversationId.substring(_groupPrefix.length),
+    ))
+      Message(
+        id: message.id,
+        conversationId: conversationId,
+        text: message.text,
+        createdAt: message.createdAt,
+        isFromCurrentUser: message.senderId == User.currentUserId,
+        senderName: MemberService().nameOf(message.senderId),
+      ),
+  ];
+
   /// The online messages in [memberId]'s chat, read up to the time the
   /// current member last read it, with the sender's name filled in.
   List<Message> _onlineMessages(String memberId) {
@@ -505,11 +540,15 @@ class ChatService {
         ? local
         : messagesIn(id);
     if (id.startsWith(_groupPrefix)) {
-      if (messages.isEmpty) return null;
-      final last = messages.last;
-      final unread = messages.where((message) => !message.isRead).length;
       final groupId = id.substring(_groupPrefix.length);
-      final group = _repo.find(_repo.groupTrades, groupId);
+      final all = OnlineGroups.group(groupId) == null
+          ? messages
+          : messagesIn(id);
+      if (all.isEmpty) return null;
+      final last = all.last;
+      final unread = all.where((message) => !message.isRead).length;
+      final group =
+          _repo.find(_repo.groupTrades, groupId) ?? OnlineGroups.group(groupId);
       if (group == null || !group.memberIds.contains(User.currentUserId)) {
         return null;
       }

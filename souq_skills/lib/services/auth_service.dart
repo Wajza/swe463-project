@@ -4,6 +4,7 @@ import 'package:souq_skills/data/device_account_store.dart';
 import 'package:souq_skills/data/profile_repository.dart';
 import 'package:souq_skills/models/user.dart';
 
+import 'listing_service.dart';
 import 'repository.dart';
 import 'seed_data.dart';
 
@@ -243,6 +244,17 @@ class AuthService {
   /// Deletes the account and its profile. Throws an [AuthException] and
   /// keeps the member signed in if that fails.
   Future<void> deleteAccount() async {
+    // The account's listings and saved listings go first, while it is still
+    // signed in. If any may remain, nothing else is deleted, so no listing
+    // is left behind that no one could remove; trying again finishes it.
+    try {
+      await ListingService().removeAccountData();
+    } on ListingException catch (error) {
+      throw AuthException(
+        'Your listings could not be removed, so your account was not '
+        'deleted. ${error.message}',
+      );
+    }
     final profiles = AuthService.profiles;
     if (profiles != null) {
       // While still signed in, as only the owner may remove the profile.

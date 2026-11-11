@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:souq_skills/core/app_options.dart';
 import 'package:souq_skills/core/category_config.dart';
@@ -18,13 +20,19 @@ class SkillPostForm extends StatefulWidget {
     required this.submitLabel,
     required this.onSubmit,
     this.canChangeKind = false,
+    this.busyLabel = 'Saving…',
     super.key,
   });
 
   final SkillPost initial;
   final String submitLabel;
-  final ValueChanged<SkillPost> onSubmit;
+
+  /// Called with the valid selections. When it returns a future, the button
+  /// shows [busyLabel] and cannot be pressed until that future completes;
+  /// the caller handles its errors.
+  final FutureOr<void> Function(SkillPost post) onSubmit;
   final bool canChangeKind;
+  final String busyLabel;
 
   @override
   State<SkillPostForm> createState() => _SkillPostFormState();
@@ -33,6 +41,7 @@ class SkillPostForm extends StatefulWidget {
 class _SkillPostFormState extends State<SkillPostForm> {
   late SkillPost _post = widget.initial;
   bool _showErrors = false;
+  bool _busy = false;
 
   String? get _categoryError =>
       _post.category == null ? 'Choose a category' : null;
@@ -51,12 +60,20 @@ class _SkillPostFormState extends State<SkillPostForm> {
     return null;
   }
 
-  void _submit() {
+  Future<void> _submit() async {
+    if (_busy) return;
     if (_categoryError != null || _skillsError != null || _wantsError != null) {
       setState(() => _showErrors = true);
       return;
     }
-    widget.onSubmit(_post);
+    final result = widget.onSubmit(_post);
+    if (result is! Future) return;
+    setState(() => _busy = true);
+    try {
+      await result;
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   void _update(SkillPost post) => setState(() => _post = post);
@@ -168,7 +185,10 @@ class _SkillPostFormState extends State<SkillPostForm> {
       ),
       if (!_post.isGroup) ..._buildSoloFields(),
       const SizedBox(height: 20),
-      SouqButton(label: widget.submitLabel, onPressed: _submit),
+      SouqButton(
+        label: _busy ? widget.busyLabel : widget.submitLabel,
+        onPressed: _busy ? null : _submit,
+      ),
     ],
   );
 }

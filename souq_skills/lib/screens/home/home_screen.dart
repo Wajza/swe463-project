@@ -10,6 +10,7 @@ import 'package:souq_skills/widgets/app_page.dart';
 import 'package:souq_skills/widgets/empty_state.dart';
 import 'package:souq_skills/widgets/listing_card.dart';
 import 'package:souq_skills/widgets/listing_filter_sheet.dart';
+import 'package:souq_skills/widgets/listings_load_error.dart';
 import 'package:souq_skills/widgets/live_view.dart';
 import 'package:souq_skills/widgets/search_field.dart';
 import 'package:souq_skills/widgets/section_header.dart';
@@ -24,29 +25,76 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   SearchCriteria _criteria = const SearchCriteria();
 
+  @override
+  void initState() {
+    super.initState();
+    // Home opens after every sign-in and app start, so the shared listings
+    // are loaded for whoever is now signed in. After the first frame, as
+    // loading updates what other screens show.
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => ListingService().refresh(),
+    );
+  }
+
   void _setCriteria(SearchCriteria criteria) =>
       setState(() => _criteria = criteria);
 
-  Widget _buildList() {
-    final profile = ProfileService();
-    final listings = ListingService().discover(_criteria);
-    return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      children: [
-        Text(
-          'Hello, ${profile.currentUser.firstName}',
-          style: context.textStyles.headlineSmall?.copyWith(
-            fontWeight: FontWeight.bold,
-          ),
+  bool get _isSearching =>
+      _criteria.query.trim().isNotEmpty || _criteria.activeFilterCount > 0;
+
+  List<Widget> _buildResults(ListingLoadState load) {
+    final service = ListingService();
+    if (!service.hasCurrentListings) {
+      // Not loaded for this account yet: nothing else is shown meanwhile.
+      if (load.isFailed) return const [];
+      return const [
+        Padding(
+          padding: EdgeInsets.all(32),
+          child: Center(child: CircularProgressIndicator()),
         ),
-        const SectionHeader(title: 'Skills for you'),
-        if (listings.isEmpty)
-          const EmptyState(
-            title: 'No skills match',
-            message: 'Try a different search or change your filters.',
+      ];
+    }
+    final listings = service.discover(_criteria);
+    if (listings.isEmpty) {
+      return [
+        _isSearching || !service.isOnline
+            ? const EmptyState(
+                title: 'No skills match',
+                message: 'Try a different search or change your filters.',
+              )
+            : const EmptyState(
+                title: 'No skills yet',
+                message: 'Be the first to post a skill.',
+              ),
+      ];
+    }
+    return [for (final listing in listings) ListingCard(listing: listing)];
+  }
+
+  Widget _buildList(ListingLoadState load) {
+    final profile = ProfileService();
+    return RefreshIndicator(
+      onRefresh: ListingService().refresh,
+      child: ListView(
+        // Pulling to refresh works however few listings there are.
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        children: [
+          Text(
+            'Hello, ${profile.currentUser.firstName}',
+            style: context.textStyles.headlineSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
           ),
-        ...listings.map((listing) => ListingCard(listing: listing)),
-      ],
+          const SectionHeader(title: 'Skills for you'),
+          if (load.isFailed)
+            ListingsLoadError(
+              message: load.error!,
+              onRetry: ListingService().refresh,
+            ),
+          ..._buildResults(load),
+        ],
+      ),
     );
   }
 
@@ -82,7 +130,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
             ),
-            Expanded(child: _buildList()),
+            Expanded(
+              child: ValueListenableBuilder<ListingLoadState>(
+                valueListenable: ListingService.loadState,
+                builder: (context, load, _) => _buildList(load),
+              ),
+            ),
           ],
         ),
       );

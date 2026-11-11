@@ -11,6 +11,7 @@ import 'package:souq_skills/widgets/listing_summary.dart';
 import 'package:souq_skills/widgets/member_tile.dart';
 import 'package:souq_skills/widgets/overflow_menu.dart';
 import 'package:souq_skills/widgets/review_card.dart';
+import 'package:souq_skills/widgets/save_listing_button.dart';
 import 'package:souq_skills/widgets/section_header.dart';
 import 'package:souq_skills/widgets/souq_button.dart';
 
@@ -28,14 +29,7 @@ class ListingDetailsScreen extends StatelessWidget {
       return AppPage(
         title: 'Listing details',
         actions: [
-          if (!isMine)
-            IconButton(
-              tooltip: listing.isSaved ? 'Remove from saved' : 'Save skill',
-              onPressed: () => ListingService().toggleSaved(listing.id),
-              icon: Icon(
-                listing.isSaved ? Icons.favorite : Icons.favorite_border,
-              ),
-            ),
+          if (!isMine) SaveListingButton(listing: listing),
           OverflowMenu(
             items: [
               MenuAction(

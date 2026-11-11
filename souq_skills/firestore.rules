@@ -1,11 +1,20 @@
 rules_version = '2';
 
-// Souq Skills: private member profiles and unique usernames.
+// Souq Skills: private member profiles, unique usernames, shared skill
+// listings and each member's saved listings.
 //
 // users/{uid}          The member's own profile. Only they can read or write
 //                      it, so private fields such as `phone` stay private.
+// users/{uid}/saved/{listingId}
+//                      The listings this member saved: { listingId, savedAt }.
+//                      Private to the member, like the profile.
 // usernames/{key}      One claim per username, keyed by its trimmed,
 //                      lower-case form: { uid, username, claimedAt }.
+// listings/{listingId} Skill listings every signed-in member can browse;
+//                      only the owner (`ownerId`, their uid) can change or
+//                      delete them. Never holds whether anyone saved it.
+//
+// Anything not matched below is denied.
 //
 // The app changes a profile and its claims in one transaction
 // (lib/data/profile_repository.dart), so these rules check the result of
@@ -78,6 +87,24 @@ service cloud.firestore {
 
       allow delete: if isOwner(uid)
         && releasedByCaller(resource.data.get('username', ''));
+
+      // users/{uid}/saved/{listingId}  The listings this member saved, as
+      // written by lib/data/saved_listings_repository.dart: only
+      // { listingId, savedAt }. Private to the member, like the profile.
+      match /saved/{listingId} {
+        allow get, list: if isOwner(uid);
+
+        // Saving again overwrites the same document, which is an update.
+        allow create, update: if isOwner(uid)
+          && request.resource.data.keys().hasOnly(['listingId', 'savedAt'])
+          && request.resource.data.listingId == listingId
+          && request.resource.data.savedAt == request.time
+          && exists(/databases/$(database)/documents/listings/$(listingId));
+
+        // Also allowed once the listing is gone, so references to deleted
+        // listings can be cleaned up.
+        allow delete: if isOwner(uid);
+      }
     }
 
     match /usernames/{key} {
@@ -106,6 +133,71 @@ service cloud.firestore {
         && resource.data.uid == request.auth.uid
         && (!existsAfter(profilePath(request.auth.uid))
             || !sameUsername(getAfter(profilePath(request.auth.uid)).data.username, key));
+    }
+
+    // listings/{listingId}  Skill listings every member can browse, written
+    //                       as in lib/data/listing_repository.dart
+    //                       (ListingDocument.toData). `ownerId` is the
+    //                       owner's uid. Whether a member saved a listing is
+    //                       theirs alone, so `isSaved` is never stored here.
+
+    // The fields ListingDocument.toData writes.
+    function listingFields() {
+      return ['ownerId', 'category', 'title', 'offers', 'wants', 'distance',
+              'description', 'city', 'availability', 'sessionsMinutes',
+              'onlineOnly', 'womenOnly', 'isPaused'];
+    }
+
+    function isText(value, min, max) {
+      return value is string && value.size() >= min && value.size() <= max;
+    }
+
+    // Every listing field has the type of SkillListing, within sensible
+    // bounds; text the app generates or picks from fixed choices.
+    function hasValidListingFields(data) {
+      return data.keys().hasAll(listingFields())
+        && data.ownerId is string
+        && isText(data.category, 1, 40)
+        && isText(data.title, 1, 100)
+        && isText(data.offers, 1, 60)
+        && isText(data.wants, 1, 60)
+        && isText(data.distance, 0, 20)
+        && isText(data.description, 0, 1000)
+        && isText(data.city, 1, 40)
+        && isText(data.availability, 0, 40)
+        && data.sessionsMinutes is int
+        && data.sessionsMinutes >= 15 && data.sessionsMinutes <= 480
+        && data.onlineOnly is bool
+        && data.womenOnly is bool
+        && data.isPaused is bool;
+    }
+
+    match /listings/{listingId} {
+      allow get, list: if signedIn();
+
+      // Only for oneself, with exactly the listing fields and both
+      // timestamps set by the server.
+      allow create: if signedIn()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.keys().hasOnly(
+             listingFields().concat(['createdAt', 'updatedAt']))
+        && hasValidListingFields(request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      // Only by the owner, who stays the owner. Only listing fields and the
+      // server's `updatedAt` may change, so `isSaved` can never be written;
+      // fields left from older records may stay as they are.
+      allow update: if signedIn()
+        && resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerId == resource.data.ownerId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+             listingFields().concat(['updatedAt']))
+        && hasValidListingFields(request.resource.data)
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if signedIn()
+        && resource.data.ownerId == request.auth.uid;
     }
   }
 }

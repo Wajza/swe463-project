@@ -11,14 +11,18 @@ import 'package:souq_skills/services/profile_service.dart';
 import 'package:souq_skills/services/proposal_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
 import 'package:souq_skills/widgets/proposal_form.dart';
+import 'package:souq_skills/widgets/trade_action.dart';
 
 class ProposalInsideChat extends StatelessWidget {
   const ProposalInsideChat({required this.request, super.key});
 
   final ProposalRequest request;
 
-  void _send(BuildContext context, TradeProposal proposal) {
-    ProposalService().send(proposal);
+  Future<void> _send(BuildContext context, TradeProposal proposal) async {
+    final sent = await context.runTradeAction(
+      () => ProposalService().send(proposal),
+    );
+    if (!sent || !context.mounted) return;
     // A proposal started from a listing continues in that member's chat.
     if (request.listingId != null) {
       context.replaceWith(AppRoutes.chat, args: request.memberId);

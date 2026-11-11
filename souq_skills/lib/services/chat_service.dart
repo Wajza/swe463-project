@@ -197,6 +197,24 @@ class ChatService {
     return Future.value();
   }
 
+  /// Shows a step of trade [tradeId] in the online chat with real member
+  /// [memberId]: the card of [proposalId] when given, otherwise a note.
+  /// Throws a [ChatException].
+  Future<void> postTradeUpdate(
+    String memberId,
+    String text, {
+    required String tradeId,
+    String? proposalId,
+  }) => _send(
+    memberId,
+    text,
+    kind: proposalId == null
+        ? ChatMessageKind.system
+        : ChatMessageKind.proposal,
+    proposalId: proposalId,
+    tradeId: tradeId,
+  );
+
   void sendToGroup(String groupId, String text) =>
       post(groupConversationId(groupId), text);
 
@@ -284,7 +302,13 @@ class ChatService {
     });
   }
 
-  Future<void> _send(String memberId, String text) async {
+  Future<void> _send(
+    String memberId,
+    String text, {
+    ChatMessageKind kind = ChatMessageKind.text,
+    String? proposalId,
+    String? tradeId,
+  }) async {
     final online = repository;
     final uid = AuthService.repository.uid;
     if (online == null || uid == null || !_repo.isSignedIn) {
@@ -295,7 +319,13 @@ class ChatService {
     }
     final message = await online.sendMessage(
       uid,
-      ChatMessageDraft(memberId: memberId, text: text),
+      ChatMessageDraft(
+        memberId: memberId,
+        text: text,
+        kind: kind,
+        proposalId: proposalId,
+        tradeId: tradeId,
+      ),
     );
     // Another account signed in meanwhile: not its message to show.
     if (!_isCurrent(uid)) return;

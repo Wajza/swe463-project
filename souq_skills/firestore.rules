@@ -33,6 +33,9 @@ rules_version = '2';
 // conversations/{conversationId}/messages/{messageId}
 //                      The chat's messages, by uid only. Never changed or
 //                      deleted once sent.
+// trades/{tradeId}     One-to-one trades between two real members, and
+// proposals/{proposalId}  their proposals and counteroffers. Only the two
+//                      members can read them; see the trade rules below.
 //
 // Anything not matched below is denied.
 //
@@ -463,8 +466,8 @@ service cloud.firestore {
     // The only other change a member can make is setting their own read
     // time to now.
     //
-    // Trades are not online yet, so a proposal or trade id in a message is
-    // only checked to be a safe id, not that the trade exists.
+    // A proposal or trade id in a message is only checked to be a safe id,
+    // not that the trade exists.
 
     function conversationPath(conversationId) {
       return /databases/$(database)/documents/conversations/$(conversationId);
@@ -589,6 +592,269 @@ service cloud.firestore {
 
         allow update, delete: if false;
       }
+    }
+
+    // Trades, as written by lib/data/trade_repository.dart.
+    //
+    // trades/{tradeId}  A one-to-one trade between two real members:
+    //   { participantIds: [smallerUid, largerUid], proposerId, termsBy,
+    //     proposalId, status, offeredSkill, requestedSkill, sessionsMinutes,
+    //     deliveryMethod, creditsOffered, completedBy: { uid: time },
+    //     session?: { scheduledAt, method, locationOrLink, notes },
+    //     createdAt, updatedAt, updatedBy }
+    // The terms are those of the current proposal (proposalId), from the
+    // side of its sender (termsBy): what they offer, what they want and the
+    // credits they pay instead of a skill.
+    //
+    // proposals/{proposalId}  Each proposal and counteroffer of a trade:
+    //   { tradeId, participantIds, senderId, receiverId, offeredSkill,
+    //     requestedSkill, sessionsMinutes, deliveryMethod, notes,
+    //     creditsOffered, status, createdAt, updatedAt }
+    //
+    // Stored by uid only. Only the two members can read either, and
+    // nothing is deleted. Each step writes the trade and its proposals in
+    // one batch or transaction, and each side checks the other:
+    //   send      a new pending trade and its pending proposal (sender)
+    //   counter   current proposal -> countered, a new pending proposal by
+    //             the caller, and the trade's terms (either member)
+    //   accept, decline  current proposal and trade (its receiver)
+    //   cancel    current proposal and trade (its sender)
+    //   schedule  the session of an accepted trade (either member)
+    //   confirm   the caller's completedBy time; the trade becomes
+    //             completed in the same write once both members confirmed
+    //   dispute   accepted -> disputed (either member)
+    // Sending, countering, accepting and scheduling need both accounts and
+    // no block either way (canMessage); ending a trade does not. Credits
+    // are not moved here: creditsOffered only records the terms.
+
+    function tradePath(tradeId) {
+      return /databases/$(database)/documents/trades/$(tradeId);
+    }
+
+    function proposalPath(proposalId) {
+      return /databases/$(database)/documents/proposals/$(proposalId);
+    }
+
+    function tradeTermFields() {
+      return ['offeredSkill', 'requestedSkill', 'sessionsMinutes',
+              'deliveryMethod', 'creditsOffered'];
+    }
+
+    function tradeFields() {
+      return ['participantIds', 'proposerId', 'termsBy', 'proposalId',
+              'status', 'completedBy', 'createdAt', 'updatedAt', 'updatedBy']
+        .concat(tradeTermFields());
+    }
+
+    function proposalFields() {
+      return ['tradeId', 'participantIds', 'senderId', 'receiverId', 'notes',
+              'status', 'createdAt', 'updatedAt'].concat(tradeTermFields());
+    }
+
+    // As TradeDocument.termsOf: a wanted skill, and a skill or credits
+    // offered for it.
+    function hasValidTerms(data) {
+      return isText(data.offeredSkill, 0, 60)
+        && isText(data.requestedSkill, 1, 60)
+        && data.sessionsMinutes is int
+        && data.sessionsMinutes >= 15 && data.sessionsMinutes <= 480
+        && isText(data.deliveryMethod, 1, 40)
+        && data.creditsOffered is int
+        && data.creditsOffered >= 0 && data.creditsOffered <= 10000
+        && (data.offeredSkill.size() > 0 || data.creditsOffered > 0);
+    }
+
+    function sameTerms(a, b) {
+      return a.offeredSkill == b.offeredSkill
+        && a.requestedSkill == b.requestedSkill
+        && a.sessionsMinutes == b.sessionsMinutes
+        && a.deliveryMethod == b.deliveryMethod
+        && a.creditsOffered == b.creditsOffered;
+    }
+
+    function isTradeParticipants(ids) {
+      return ids is list && ids.size() == 2
+        && isSafeId(ids[0]) && isSafeId(ids[1])
+        && ids[0] < ids[1]
+        && request.auth.uid in ids;
+    }
+
+    function isValidNewTrade(tradeId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly(tradeFields())
+        && data.keys().hasAll(tradeFields())
+        && isTradeParticipants(data.participantIds)
+        && data.proposerId == request.auth.uid
+        && data.termsBy == request.auth.uid
+        && data.updatedBy == request.auth.uid
+        && data.status == 'pending'
+        && hasValidTerms(data)
+        && data.completedBy == {}
+        && data.createdAt == request.time
+        && data.updatedAt == request.time
+        && isSafeId(data.proposalId)
+        // Its first proposal is created in the same write; the proposal
+        // rules check what it holds.
+        && getAfter(proposalPath(data.proposalId)).data.tradeId == tradeId
+        && canMessage(otherParticipant(data.participantIds));
+    }
+
+    // A pending proposal by the caller that is the trade's current one
+    // after this write, with the same terms.
+    function isValidNewProposal(proposalId) {
+      let data = request.resource.data;
+      let trade = getAfter(tradePath(data.tradeId)).data;
+      return data.keys().hasOnly(proposalFields())
+        && data.keys().hasAll(proposalFields())
+        && isSafeId(data.tradeId)
+        && request.auth.uid in trade.participantIds
+        && data.participantIds == trade.participantIds
+        && data.senderId == request.auth.uid
+        && data.receiverId == otherParticipant(trade.participantIds)
+        && data.status == 'pending'
+        && isText(data.notes, 0, 500)
+        && hasValidTerms(data)
+        && trade.status == 'pending'
+        && trade.proposalId == proposalId
+        && trade.termsBy == request.auth.uid
+        && sameTerms(data, trade)
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    // The trade's current pending proposal is countered, accepted,
+    // declined or cancelled, together with the trade.
+    function isValidProposalUpdate(proposalId) {
+      let before = resource.data;
+      let data = request.resource.data;
+      let tradeBefore = get(tradePath(before.tradeId)).data;
+      let tradeAfter = getAfter(tradePath(before.tradeId)).data;
+      return data.diff(before).affectedKeys().hasOnly(['status', 'updatedAt'])
+        && data.updatedAt == request.time
+        && before.status == 'pending'
+        && tradeBefore.status == 'pending'
+        && tradeBefore.proposalId == proposalId
+        && ((data.status == 'countered'
+              && tradeAfter.status == 'pending'
+              && tradeAfter.proposalId != proposalId)
+            || (data.status == 'accepted'
+              && before.receiverId == request.auth.uid
+              && tradeAfter.status == 'accepted')
+            || (data.status == 'declined'
+              && before.receiverId == request.auth.uid
+              && tradeAfter.status == 'declined')
+            || (data.status == 'cancelled'
+              && before.senderId == request.auth.uid
+              && tradeAfter.status == 'cancelled'));
+    }
+
+    function isTradeCounter(before, data, changed) {
+      return before.status == 'pending'
+        && data.status == 'pending'
+        && changed.hasOnly(tradeTermFields().concat(
+             ['termsBy', 'proposalId', 'updatedAt', 'updatedBy']))
+        && isSafeId(data.proposalId)
+        && !exists(proposalPath(data.proposalId))
+        && existsAfter(proposalPath(data.proposalId))
+        && data.termsBy == request.auth.uid
+        && hasValidTerms(data)
+        && getAfter(proposalPath(before.proposalId)).data.status == 'countered'
+        && canMessage(otherParticipant(before.participantIds));
+    }
+
+    function isTradeAnswer(before, data, changed) {
+      let proposal = getAfter(proposalPath(before.proposalId)).data;
+      return before.status == 'pending'
+        && changed.hasOnly(['status', 'updatedAt', 'updatedBy'])
+        && proposal.status == data.status
+        && ((data.status == 'accepted'
+              && proposal.receiverId == request.auth.uid
+              && canMessage(otherParticipant(before.participantIds)))
+            || (data.status == 'declined'
+              && proposal.receiverId == request.auth.uid)
+            || (data.status == 'cancelled'
+              && proposal.senderId == request.auth.uid));
+    }
+
+    function isTradeSchedule(before, data, changed) {
+      let session = data.session;
+      let fields = ['scheduledAt', 'method', 'locationOrLink', 'notes'];
+      return before.status == 'accepted'
+        && changed.hasOnly(['session', 'updatedAt', 'updatedBy'])
+        && session is map
+        && session.keys().hasOnly(fields)
+        && session.keys().hasAll(fields)
+        && session.scheduledAt is timestamp
+        && session.scheduledAt > request.time
+        && isText(session.method, 1, 40)
+        && isText(session.locationOrLink, 0, 200)
+        && isText(session.notes, 0, 500)
+        && canMessage(otherParticipant(before.participantIds));
+    }
+
+    // The caller confirms once, after a session was booked. Completed
+    // exactly when both members have confirmed.
+    function isTradeConfirmation(before, data, changed) {
+      let ids = before.participantIds;
+      let done = data.completedBy;
+      return before.status == 'accepted'
+        && before.keys().hasAny(['session'])
+        && changed.hasOnly(['completedBy', 'status', 'updatedAt', 'updatedBy'])
+        && done is map
+        && !(request.auth.uid in before.completedBy)
+        && done.diff(before.completedBy).affectedKeys().hasOnly([request.auth.uid])
+        && done[request.auth.uid] == request.time
+        && ((done.keys().hasAll(ids) && data.status == 'completed')
+            || (!done.keys().hasAll(ids) && data.status == 'accepted'));
+    }
+
+    function isTradeDispute(before, data, changed) {
+      return before.status == 'accepted'
+        && data.status == 'disputed'
+        && changed.hasOnly(['status', 'updatedAt', 'updatedBy']);
+    }
+
+    function isValidTradeUpdate() {
+      let before = resource.data;
+      let data = request.resource.data;
+      let changed = data.diff(before).affectedKeys();
+      return !changed.hasAny(['participantIds', 'proposerId', 'createdAt'])
+        && data.keys().hasOnly(tradeFields().concat(['session']))
+        && data.updatedBy == request.auth.uid
+        && data.updatedAt == request.time
+        && (isTradeCounter(before, data, changed)
+            || isTradeAnswer(before, data, changed)
+            || isTradeSchedule(before, data, changed)
+            || isTradeConfirmation(before, data, changed)
+            || isTradeDispute(before, data, changed));
+    }
+
+    match /trades/{tradeId} {
+      // Lists must be filtered by participantIds containing the caller.
+      allow get, list: if signedIn()
+        && request.auth.uid in resource.data.participantIds;
+
+      allow create: if signedIn() && isValidNewTrade(tradeId);
+
+      allow update: if signedIn()
+        && request.auth.uid in resource.data.participantIds
+        && isValidTradeUpdate();
+
+      allow delete: if false;
+    }
+
+    match /proposals/{proposalId} {
+      // Lists must be filtered by participantIds containing the caller.
+      allow get, list: if signedIn()
+        && request.auth.uid in resource.data.participantIds;
+
+      allow create: if signedIn() && isValidNewProposal(proposalId);
+
+      allow update: if signedIn()
+        && request.auth.uid in resource.data.participantIds
+        && isValidProposalUpdate(proposalId);
+
+      allow delete: if false;
     }
   }
 }

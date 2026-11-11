@@ -15,14 +15,18 @@ import 'package:souq_skills/widgets/overflow_menu.dart';
 import 'package:souq_skills/widgets/section_header.dart';
 import 'package:souq_skills/widgets/souq_button.dart';
 import 'package:souq_skills/widgets/status_chip.dart';
+import 'package:souq_skills/widgets/trade_action.dart';
 
 class ProposalDetailsScreen extends StatelessWidget {
   const ProposalDetailsScreen({required this.proposalId, super.key});
 
   final String proposalId;
 
-  void _accept(BuildContext context, TradeProposal proposal) {
-    ProposalService().accept(proposalId);
+  Future<void> _accept(BuildContext context, TradeProposal proposal) async {
+    final accepted = await context.runTradeAction(
+      () => ProposalService().accept(proposalId),
+    );
+    if (!accepted || !context.mounted) return;
     context.replaceWith(AppRoutes.tradeDetails, args: proposal.tradeId);
   }
 
@@ -53,7 +57,9 @@ class ProposalDetailsScreen extends StatelessWidget {
         ),
         MenuAction(
           'Cancel proposal',
-          () => ProposalService().cancel(proposalId),
+          () => context.runTradeAction(
+            () => ProposalService().cancel(proposalId),
+          ),
         ),
       ];
     }

@@ -12,6 +12,7 @@ import 'package:souq_skills/widgets/form_section.dart';
 import 'package:souq_skills/widgets/info_card.dart';
 import 'package:souq_skills/widgets/info_tile.dart';
 import 'package:souq_skills/widgets/souq_button.dart';
+import 'package:souq_skills/widgets/trade_action.dart';
 
 class ScheduleSessionScreen extends StatefulWidget {
   const ScheduleSessionScreen({required this.tradeId, super.key});
@@ -76,18 +77,21 @@ class _ScheduleSessionScreenState extends State<ScheduleSessionScreen> {
     );
   }
 
-  void _save() {
+  Future<void> _save() async {
     if (_scheduledAt.isBefore(DateTime.now())) {
       context.showMessage('Choose a time in the future');
       return;
     }
-    TradeSessionService().schedule(
-      tradeId: widget.tradeId,
-      scheduledAt: _scheduledAt,
-      method: _method,
-      locationOrLink: _isInPerson ? _place : '',
-      notes: '',
+    final saved = await context.runTradeAction(
+      () => TradeSessionService().schedule(
+        tradeId: widget.tradeId,
+        scheduledAt: _scheduledAt,
+        method: _method,
+        locationOrLink: _isInPerson ? _place : '',
+        notes: '',
+      ),
     );
+    if (!saved || !mounted) return;
     context.back();
     context.showMessage('Session scheduled');
   }

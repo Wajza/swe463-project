@@ -13,6 +13,7 @@ import 'member_service.dart';
 import 'notification_service.dart';
 import 'repository.dart';
 import 'seed_data.dart';
+import 'trade_service.dart';
 
 export 'package:souq_skills/data/blocked_members_repository.dart'
     show BlockingException;
@@ -225,19 +226,20 @@ class SafetyService {
   /// Opens a dispute on this device only, straight away. Kept as it was
   /// for the dispute screen; [submitTradeDispute] is the online version.
   DisputeCase disputeTrade({required String tradeId, required String reason}) {
+    _markDisputed(tradeId);
+    return _file(CaseKind.tradeDispute, reason, tradeId: tradeId);
+  }
+
+  void _markDisputed(String tradeId) {
     _repo.update(
       _repo.trades,
       tradeId,
       (trade) => trade.copyWith(status: TradeStatus.disputed),
     );
-    return _file(CaseKind.tradeDispute, reason, tradeId: tradeId);
+    // A trade with a real member is disputed for both members; the case
+    // itself is already saved.
+    TradeService().markDisputedOnline(tradeId).catchError((Object _) {});
   }
-
-  void _markDisputed(String tradeId) => _repo.update(
-    _repo.trades,
-    tradeId,
-    (trade) => trade.copyWith(status: TradeStatus.disputed),
-  );
 
   static ReportRepository? _reports;
 

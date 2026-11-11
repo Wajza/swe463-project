@@ -1,5 +1,5 @@
 // Firestore security rules tests for Souq Skills profiles, usernames,
-// listings, blocks, reports, reviews and chats.
+// listings, blocks, reports, reviews, chats and trades.
 //
 // Run from souq_skills/ (starts and stops the emulator, deploys nothing):
 //   firebase emulators:exec --only firestore --project demo-souq-skills \
@@ -2275,5 +2275,293 @@ describe('chats: what the rules must refuse', () => {
     const stored = await read(chatPath(ME, OTHER));
     assert.equal(stored.lastMessage, 'Hello');
     assert.deepEqual(stored.participantIds, [ME, OTHER].sort());
+  });
+});
+
+// Trades: trades/{tradeId} and proposals/{proposalId}
+
+const TOMORROW = () => new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+const terms = (extra = {}) => ({
+  offeredSkill: 'Baking',
+  requestedSkill: 'Flutter',
+  sessionsMinutes: 60,
+  deliveryMethod: 'Online',
+  creditsOffered: 0,
+  ...extra,
+});
+
+/// Mirrors FirebaseTradeRepository.sendProposal: the trade and its first
+/// proposal in one batch. [trade] and [proposal] replace fields. Resolves
+/// to { tradeId, proposalId }.
+async function sendProposal(db, uid, memberId, { trade = {}, proposal = {} } = {}) {
+  const tradeRef = doc(collection(db, 'trades'));
+  const proposalRef = doc(collection(db, 'proposals'));
+  const participantIds = [uid, memberId].sort();
+  const batch = writeBatch(db);
+  batch.set(tradeRef, {
+    participantIds,
+    proposerId: uid,
+    termsBy: uid,
+    proposalId: proposalRef.id,
+    status: 'pending',
+    ...terms(),
+    completedBy: {},
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+    ...trade,
+  });
+  batch.set(proposalRef, {
+    tradeId: tradeRef.id,
+    participantIds,
+    senderId: uid,
+    receiverId: memberId,
+    ...terms(),
+    notes: '',
+    status: 'pending',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    ...proposal,
+  });
+  await batch.commit();
+  return { tradeId: tradeRef.id, proposalId: proposalRef.id };
+}
+
+/// Mirrors respondToProposal: the proposal and its trade together.
+function respond(db, uid, { tradeId, proposalId }, status, tradeStatus = status) {
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'proposals', proposalId), { status, updatedAt: serverTimestamp() });
+  batch.update(doc(db, 'trades', tradeId), {
+    status: tradeStatus,
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+  });
+  return batch.commit();
+}
+
+/// Mirrors counterProposal: old proposal countered, a new one by [uid]
+/// (to [memberId]) becoming the trade's terms. Resolves to the new id.
+async function counter(db, uid, memberId, { tradeId, proposalId }, newTerms = terms({ offeredSkill: 'Flutter', requestedSkill: 'Bread' })) {
+  const next = doc(collection(db, 'proposals'));
+  const batch = writeBatch(db);
+  batch.update(doc(db, 'proposals', proposalId), { status: 'countered', updatedAt: serverTimestamp() });
+  batch.set(next, {
+    tradeId,
+    participantIds: [uid, memberId].sort(),
+    senderId: uid,
+    receiverId: memberId,
+    ...newTerms,
+    notes: '',
+    status: 'pending',
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  batch.update(doc(db, 'trades', tradeId), {
+    ...newTerms,
+    termsBy: uid,
+    proposalId: next.id,
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+  });
+  await batch.commit();
+  return next.id;
+}
+
+/// Mirrors scheduleSession.
+const schedule = (db, uid, tradeId, scheduledAt = TOMORROW()) =>
+  updateDoc(doc(db, 'trades', tradeId), {
+    session: { scheduledAt, method: 'Online', locationOrLink: '', notes: '' },
+    updatedAt: serverTimestamp(),
+    updatedBy: uid,
+  });
+
+/// Mirrors confirmCompletion: decided in a transaction from what is stored.
+/// [status] forces the stored status, for what must be refused.
+const confirm = (db, uid, tradeId, { status } = {}) =>
+  runTransaction(db, async (transaction) => {
+    const ref = doc(db, 'trades', tradeId);
+    const trade = (await transaction.get(ref)).data();
+    const completedBy = { ...trade.completedBy, [uid]: serverTimestamp() };
+    const done = trade.participantIds.every((id) => id in completedBy);
+    transaction.update(ref, {
+      completedBy,
+      ...(status ? { status } : done ? { status: 'completed' } : {}),
+      updatedAt: serverTimestamp(),
+      updatedBy: uid,
+    });
+  });
+
+async function fetchTradeIds(db, uid) {
+  const snapshot = await getDocs(
+    query(collection(db, 'trades'), where('participantIds', 'array-contains', uid), limit(200)),
+  );
+  return snapshot.docs.map((item) => item.id);
+}
+
+/// A trade [ME] proposed and [OTHER] accepted, with a session booked.
+async function acceptedTrade() {
+  await seedAccounts(ME, OTHER, THIRD);
+  const sent = await sendProposal(dbAs(ME), ME, OTHER);
+  await respond(dbAs(OTHER), OTHER, sent, 'accepted');
+  await schedule(dbAs(ME), ME, sent.tradeId);
+  return sent;
+}
+
+describe('trades: what the rules must allow', () => {
+  test('a member proposes, and only the two members can read it', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+    const sent = await assertSucceeds(sendProposal(dbAs(ME), ME, OTHER));
+
+    assert.deepEqual(await fetchTradeIds(dbAs(ME), ME), [sent.tradeId]);
+    assert.deepEqual(await fetchTradeIds(dbAs(OTHER), OTHER), [sent.tradeId]);
+    await assertSucceeds(getDoc(doc(dbAs(OTHER), 'proposals', sent.proposalId)));
+    await assertFails(getDoc(doc(dbAs(THIRD), 'trades', sent.tradeId)));
+    await assertFails(getDoc(doc(dbAs(THIRD), 'proposals', sent.proposalId)));
+    await assertFails(getDocs(collection(dbAs(THIRD), 'trades')));
+  });
+
+  test('the receiver accepts, a session is booked and rescheduled', async () => {
+    const sent = await acceptedTrade();
+    await assertSucceeds(schedule(dbAs(OTHER), OTHER, sent.tradeId, new Date(Date.now() + 3 * 86400000)));
+    const stored = await read(`trades/${sent.tradeId}`);
+    assert.equal(stored.status, 'accepted');
+    assert.equal(stored.updatedBy, OTHER);
+  });
+
+  test('a trade completes once both members confirmed', async () => {
+    const sent = await acceptedTrade();
+    await assertSucceeds(confirm(dbAs(ME), ME, sent.tradeId));
+    assert.equal((await read(`trades/${sent.tradeId}`)).status, 'accepted');
+
+    await assertSucceeds(confirm(dbAs(OTHER), OTHER, sent.tradeId));
+    const stored = await read(`trades/${sent.tradeId}`);
+    assert.equal(stored.status, 'completed');
+    assert.deepEqual(Object.keys(stored.completedBy).sort(), [ME, OTHER].sort());
+  });
+
+  test('either member counters, and the other answers the new terms', async () => {
+    await seedAccounts(ME, OTHER);
+    const sent = await sendProposal(dbAs(ME), ME, OTHER);
+    const counterId = await assertSucceeds(counter(dbAs(OTHER), OTHER, ME, sent));
+    assert.equal((await read(`proposals/${sent.proposalId}`)).status, 'countered');
+    assert.equal((await read(`trades/${sent.tradeId}`)).termsBy, OTHER);
+
+    await assertSucceeds(respond(dbAs(ME), ME, { ...sent, proposalId: counterId }, 'accepted'));
+  });
+
+  test('the receiver declines; the sender cancels', async () => {
+    await seedAccounts(ME, OTHER);
+    const first = await sendProposal(dbAs(ME), ME, OTHER);
+    await assertSucceeds(respond(dbAs(OTHER), OTHER, first, 'declined'));
+    const second = await sendProposal(dbAs(ME), ME, OTHER);
+    await assertSucceeds(respond(dbAs(ME), ME, second, 'cancelled'));
+  });
+
+  test('a trade with a blocked member can still be confirmed', async () => {
+    const sent = await acceptedTrade();
+    await seed({ [`users/${OTHER}/blocked/${ME}`]: { blockedUid: ME, blockedAt: new Date() } });
+    await assertSucceeds(confirm(dbAs(ME), ME, sent.tradeId));
+    await assertFails(schedule(dbAs(ME), ME, sent.tradeId));
+  });
+
+  test('accepted trades can be disputed by either member', async () => {
+    const sent = await acceptedTrade();
+    await assertSucceeds(
+      updateDoc(doc(dbAs(OTHER), 'trades', sent.tradeId), {
+        status: 'disputed',
+        updatedAt: serverTimestamp(),
+        updatedBy: OTHER,
+      }),
+    );
+  });
+});
+
+describe('trades: what the rules must refuse', () => {
+  test('a trade for someone else, with "me", or without its proposal', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+    await assertFails(sendProposal(dbAs(THIRD), ME, OTHER));
+    await assertFails(sendProposal(dbAs(ME), ME, OTHER, { trade: { proposerId: OTHER } }));
+    await assertFails(sendProposal(dbAs(ME), ME, 'me'));
+    await assertFails(sendProposal(dbAs(ME), ME, ME));
+    await assertFails(sendProposal(dbAs(ME), ME, 'uid-nobody'));
+    await assertFails(sendProposal(dbAs(ME), ME, OTHER, { trade: { status: 'accepted' } }));
+    await assertFails(sendProposal(dbAs(ME), ME, OTHER, { proposal: { requestedSkill: 'Other' } }));
+    await assertFails(sendProposal(dbAs(ME), ME, OTHER, { proposal: { senderId: OTHER, receiverId: ME } }));
+    await assertFails(sendProposal(dbAs(ME), ME, OTHER, { trade: { offeredSkill: '', creditsOffered: 0 }, proposal: { offeredSkill: '', creditsOffered: 0 } }));
+    const tradeOnly = doc(collection(dbAs(ME), 'trades'));
+    await assertFails(
+      setDoc(tradeOnly, {
+        participantIds: [ME, OTHER].sort(), proposerId: ME, termsBy: ME, proposalId: 'missing',
+        status: 'pending', ...terms(), completedBy: {}, createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(), updatedBy: ME,
+      }),
+    );
+  });
+
+  test('the sender accepting, or anyone else answering', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+    const sent = await sendProposal(dbAs(ME), ME, OTHER);
+    await assertFails(respond(dbAs(ME), ME, sent, 'accepted'));
+    await assertFails(respond(dbAs(ME), ME, sent, 'declined'));
+    await assertFails(respond(dbAs(OTHER), OTHER, sent, 'cancelled'));
+    await assertFails(respond(dbAs(THIRD), THIRD, sent, 'accepted'));
+    // A trade status that does not match the answer.
+    await assertFails(respond(dbAs(OTHER), OTHER, sent, 'accepted', 'completed'));
+    await assertFails(respond(dbAs(OTHER), OTHER, sent, 'declined', 'accepted'));
+  });
+
+  test('answering twice or answering a countered proposal', async () => {
+    await seedAccounts(ME, OTHER);
+    const sent = await sendProposal(dbAs(ME), ME, OTHER);
+    await counter(dbAs(OTHER), OTHER, ME, sent);
+    await assertFails(respond(dbAs(OTHER), OTHER, sent, 'accepted'));
+
+    const second = await sendProposal(dbAs(ME), ME, OTHER);
+    await respond(dbAs(OTHER), OTHER, second, 'declined');
+    await assertFails(respond(dbAs(OTHER), OTHER, second, 'accepted'));
+  });
+
+  test('completing with one confirmation, twice, or for the other member', async () => {
+    const sent = await acceptedTrade();
+    await assertFails(confirm(dbAs(ME), ME, sent.tradeId, { status: 'completed' }));
+    await assertFails(
+      updateDoc(doc(dbAs(ME), 'trades', sent.tradeId), {
+        [`completedBy.${OTHER}`]: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        updatedBy: ME,
+      }),
+    );
+    await confirm(dbAs(ME), ME, sent.tradeId);
+    await assertFails(confirm(dbAs(ME), ME, sent.tradeId));
+    await assertFails(confirm(dbAs(THIRD), THIRD, sent.tradeId));
+  });
+
+  test('confirming before a session, or scheduling too early or in the past', async () => {
+    await seedAccounts(ME, OTHER);
+    const sent = await sendProposal(dbAs(ME), ME, OTHER);
+    await assertFails(schedule(dbAs(ME), ME, sent.tradeId));
+    await respond(dbAs(OTHER), OTHER, sent, 'accepted');
+    await assertFails(confirm(dbAs(ME), ME, sent.tradeId));
+    await assertFails(schedule(dbAs(ME), ME, sent.tradeId, new Date(Date.now() - 3600000)));
+  });
+
+  test('proposing to, accepting or scheduling with a blocked member', async () => {
+    await seedAccounts(ME, OTHER);
+    const sent = await sendProposal(dbAs(ME), ME, OTHER);
+    await seed({ [`users/${OTHER}/blocked/${ME}`]: { blockedUid: ME, blockedAt: new Date() } });
+    await assertFails(sendProposal(dbAs(ME), ME, OTHER));
+    await assertFails(respond(dbAs(OTHER), OTHER, sent, 'accepted'));
+    await assertSucceeds(respond(dbAs(OTHER), OTHER, sent, 'declined'));
+  });
+
+  test('changing members or terms directly, or deleting', async () => {
+    const sent = await acceptedTrade();
+    const tradeRef = doc(dbAs(ME), 'trades', sent.tradeId);
+    await assertFails(updateDoc(tradeRef, { participantIds: [ME, THIRD].sort(), updatedAt: serverTimestamp(), updatedBy: ME }));
+    await assertFails(updateDoc(tradeRef, { creditsOffered: 500, updatedAt: serverTimestamp(), updatedBy: ME }));
+    await assertFails(updateDoc(tradeRef, { status: 'pending', updatedAt: serverTimestamp(), updatedBy: ME }));
+    await assertFails(deleteDoc(tradeRef));
+    await assertFails(deleteDoc(doc(dbAs(ME), 'proposals', sent.proposalId)));
   });
 });

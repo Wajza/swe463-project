@@ -1,6 +1,7 @@
 import 'package:souq_skills/models/transaction.dart';
 
 import 'repository.dart';
+import 'trade_service.dart';
 
 class WalletService {
   final Repository _repo = Repository.instance;
@@ -9,7 +10,8 @@ class WalletService {
       _repo.transactions.fold(0, (sum, item) => sum + item.amount);
 
   /// Credits promised to active trades, which are paid when a trade completes.
-  int heldCredits({String? excludingTradeId}) => _repo.trades
+  int heldCredits({String? excludingTradeId}) => TradeService()
+      .all()
       .where((trade) => trade.isActive && trade.id != excludingTradeId)
       .fold(0, (sum, trade) => sum + trade.creditsPaid);
 

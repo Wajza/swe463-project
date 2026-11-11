@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:souq_skills/services/proposal_service.dart';
 
+import 'trade_action.dart';
+
 import 'confirmation_dialog.dart';
 
 abstract final class DeclineProposalDialog {
@@ -12,6 +14,7 @@ abstract final class DeclineProposalDialog {
       confirmLabel: 'Decline',
       destructive: true,
     );
-    if (confirmed) ProposalService().decline(proposalId);
+    if (!confirmed || !context.mounted) return;
+    await context.runTradeAction(() => ProposalService().decline(proposalId));
   }
 }

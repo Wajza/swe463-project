@@ -5,6 +5,8 @@ import 'package:souq_skills/services/member_service.dart';
 import 'package:souq_skills/services/profile_service.dart';
 import 'package:souq_skills/services/proposal_service.dart';
 
+import 'trade_action.dart';
+
 import 'proposal_form.dart';
 
 /// Lets a member change a proposal's terms without leaving the current screen.
@@ -36,8 +38,11 @@ class CounterofferSheet extends StatelessWidget {
                   ?.skillsOffered ??
               const [],
           submitLabel: 'Send counteroffer',
-          onSubmit: (draft) {
-            service.counter(proposal.id, draft);
+          onSubmit: (draft) async {
+            final sent = await context.runTradeAction(
+              () => service.counter(proposal.id, draft),
+            );
+            if (!sent || !context.mounted) return;
             Navigator.pop(context);
             context.showMessage('Counteroffer sent');
           },

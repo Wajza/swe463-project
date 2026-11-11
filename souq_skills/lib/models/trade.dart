@@ -25,6 +25,8 @@ class Trade implements Identifiable {
     this.creditsPaid = 0,
     this.status = TradeStatus.pending,
     this.sessionId,
+    this.confirmedByMe = false,
+    this.confirmedByOther = false,
   });
 
   @override
@@ -39,6 +41,11 @@ class Trade implements Identifiable {
   final int creditsPaid;
   final TradeStatus status;
   final String? sessionId;
+
+  /// Whether the current user, and the other member, confirmed the
+  /// exchange happened. A shared trade is completed once both have.
+  final bool confirmedByMe;
+  final bool confirmedByOther;
 
   bool get isComplete => status == TradeStatus.completed;
   bool get isActive =>
@@ -57,6 +64,8 @@ class Trade implements Identifiable {
     int? creditsPaid,
     TradeStatus? status,
     String? sessionId,
+    bool? confirmedByMe,
+    bool? confirmedByOther,
   }) => Trade(
     id: id,
     proposalId: proposalId ?? this.proposalId,
@@ -67,6 +76,8 @@ class Trade implements Identifiable {
     creditsPaid: creditsPaid ?? this.creditsPaid,
     status: status ?? this.status,
     sessionId: sessionId ?? this.sessionId,
+    confirmedByMe: confirmedByMe ?? this.confirmedByMe,
+    confirmedByOther: confirmedByOther ?? this.confirmedByOther,
   );
 
   Map<String, dynamic> toJson() => {
@@ -79,6 +90,8 @@ class Trade implements Identifiable {
     'creditsPaid': creditsPaid,
     'status': status.name,
     'sessionId': sessionId,
+    'confirmedByMe': confirmedByMe,
+    'confirmedByOther': confirmedByOther,
   };
 
   factory Trade.fromJson(Map<String, dynamic> json) => Trade(
@@ -91,5 +104,8 @@ class Trade implements Identifiable {
     creditsPaid: json['creditsPaid'] as int,
     status: TradeStatus.values.byName(json['status'] as String),
     sessionId: json['sessionId'] as String?,
+    // Missing from data saved before confirmations existed.
+    confirmedByMe: json['confirmedByMe'] as bool? ?? false,
+    confirmedByOther: json['confirmedByOther'] as bool? ?? false,
   );
 }

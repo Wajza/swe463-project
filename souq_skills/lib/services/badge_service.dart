@@ -2,20 +2,18 @@ import 'package:souq_skills/core/app_routes.dart';
 import 'package:souq_skills/core/badge_config.dart';
 import 'package:souq_skills/models/achievement_badge.dart';
 import 'package:souq_skills/models/notification.dart';
-import 'package:souq_skills/models/trade.dart';
 import 'package:souq_skills/models/user.dart';
 
 import 'notification_service.dart';
 import 'repository.dart';
+import 'trade_service.dart';
 
 /// Works out badge progress from the user's real activity.
 class BadgeService {
   final Repository _repo = Repository.instance;
 
   List<AchievementBadge> badges() {
-    final completedTrades = _repo.trades
-        .where((trade) => trade.status == TradeStatus.completed)
-        .length;
+    final completedTrades = TradeService().completedCount();
     final received = _repo.reviews.where(
       (review) => review.subjectId == User.currentUserId,
     );

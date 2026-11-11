@@ -5,6 +5,8 @@ import 'package:souq_skills/models/trade_proposal.dart';
 import 'package:souq_skills/services/member_service.dart';
 import 'package:souq_skills/services/proposal_service.dart';
 
+import 'trade_action.dart';
+
 import 'counteroffer_sheet.dart';
 import 'decline_proposal_dialog.dart';
 import 'status_chip.dart';
@@ -35,14 +37,16 @@ class ProposalCard extends StatelessWidget {
       return [
         counter,
         TextButton(
-          onPressed: () => service.cancel(proposal.id),
+          onPressed: () =>
+              context.runTradeAction(() => service.cancel(proposal.id)),
           child: const Text('Cancel'),
         ),
       ];
     }
     return [
       TextButton(
-        onPressed: () => service.accept(proposal.id),
+        onPressed: () =>
+            context.runTradeAction(() => service.accept(proposal.id)),
         child: const Text('Accept'),
       ),
       counter,

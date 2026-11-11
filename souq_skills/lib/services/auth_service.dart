@@ -6,6 +6,7 @@ import 'package:souq_skills/data/profile_repository.dart';
 import 'package:souq_skills/models/user.dart';
 
 import 'chat_service.dart';
+import 'online_trades.dart';
 import 'listing_service.dart';
 import 'profile_service.dart';
 import 'repository.dart';
@@ -356,6 +357,7 @@ class AuthService {
     _repo.isSignedIn = value;
     // Chats online follow the signed-in account, and stop when signed out.
     ChatService.syncSession();
+    OnlineTrades.syncSession();
     _repo.emitChange();
   }
 }

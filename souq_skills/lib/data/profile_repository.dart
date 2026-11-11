@@ -1,5 +1,18 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart' as auth;
 import 'package:souq_skills/models/user.dart';
+
+/// What a member shares on their public profile, `publicProfiles/{uid}`.
+/// Names and username are always shared, as listings and chats need them.
+class ProfileVisibility {
+  const ProfileVisibility({this.showProfile = true, this.showLocation = true});
+
+  /// False keeps city, bio, skills and availability private.
+  final bool showProfile;
+
+  /// False keeps the city private.
+  final bool showLocation;
+}
 
 /// A profile problem explained in words the member can act on.
 class ProfileException implements Exception {
@@ -30,15 +43,27 @@ abstract class ProfileRepository {
   Future<User?> fetchProfile(String uid);
 
   /// Saves [profile] as the profile of [uid], keeping fields this app does
-  /// not know about, and claims its username. The first save creates the
-  /// profile. Throws a [ProfileException] if it cannot be saved, or
+  /// not know about, claims its username, and publishes what [visibility]
+  /// allows at `publicProfiles/{uid}`, all together. The first save creates
+  /// the profile. Throws a [ProfileException] if it cannot be saved, or
   /// [ProfileException.usernameTaken] if another account has the username;
   /// nothing is changed then.
-  Future<void> saveProfile(String uid, User profile);
+  Future<void> saveProfile(
+    String uid,
+    User profile, {
+    ProfileVisibility visibility = const ProfileVisibility(),
+  });
 
-  /// Removes the profile of [uid] and frees its username, together.
-  /// Throws a [ProfileException] and changes nothing if that fails.
+  /// Removes the profile of [uid], its public profile and its username
+  /// claim, together. Throws a [ProfileException] and changes nothing if
+  /// that fails.
   Future<void> deleteProfile(String uid);
+
+  /// The public profiles of [uids] that exist, by uid, each as a [User]
+  /// whose id is the uid and whose phone is empty. Profiles that could not
+  /// be read are left out, so they can be tried again later; it never
+  /// throws.
+  Future<Map<String, User>> fetchPublicProfiles(Iterable<String> uids);
 }
 
 /// What saving a profile does to the username claims.
@@ -91,6 +116,47 @@ abstract final class ProfileDocument {
     'username': username.trim(),
   };
 
+  /// The data stored at `publicProfiles/{uid}`: only what other members
+  /// may see, and never the phone number. [isVerified] comes from how the
+  /// account signed in, not from the profile.
+  static Map<String, dynamic> toPublicData(
+    String uid,
+    User profile,
+    ProfileVisibility visibility, {
+    required bool isVerified,
+  }) {
+    final details = visibility.showProfile;
+    return {
+      'uid': uid,
+      'firstName': profile.firstName,
+      'lastName': profile.lastName,
+      'username': profile.username,
+      'city': details && visibility.showLocation ? profile.city : '',
+      'bio': details ? profile.bio : '',
+      'skillsOffered': details ? profile.skillsOffered : const <String>[],
+      'skillsWanted': details ? profile.skillsWanted : const <String>[],
+      'availability': details ? profile.availability : '',
+      'isVerified': isVerified,
+      // Also decides whether others may read the member's reviews.
+      'profileVisible': details,
+    };
+  }
+
+  /// Reads another member's public profile as a [User] with [uid] as its
+  /// id, so it is never mistaken for the current member, and no phone.
+  static User fromPublicData(String uid, Map<String, dynamic> data) => User(
+    id: uid,
+    firstName: _text(data['firstName']),
+    lastName: _text(data['lastName']),
+    username: _text(data['username']),
+    city: _text(data['city']),
+    bio: _text(data['bio']),
+    isVerified: data['isVerified'] is bool ? data['isVerified'] as bool : false,
+    skillsOffered: _texts(data['skillsOffered']),
+    skillsWanted: _texts(data['skillsWanted']),
+    availability: _text(data['availability']),
+  );
+
   /// The fields to store for [profile] under [uid].
   static Map<String, dynamic> toData(String uid, User profile) => {
     ...profile.toJson(),
@@ -121,13 +187,25 @@ abstract final class ProfileDocument {
 
 /// Profiles in Cloud Firestore.
 class FirebaseProfileRepository implements ProfileRepository {
-  FirebaseProfileRepository({FirebaseFirestore? firestore})
-    : _firestore = firestore ?? FirebaseFirestore.instance;
+  FirebaseProfileRepository({
+    FirebaseFirestore? firestore,
+    bool Function()? isPhoneVerified,
+  }) : _firestore = firestore ?? FirebaseFirestore.instance,
+       _isPhoneVerified =
+           isPhoneVerified ??
+           (() => auth.FirebaseAuth.instance.currentUser?.phoneNumber != null);
 
   final FirebaseFirestore _firestore;
 
+  /// Whether the signed-in account was verified by phone, which is what
+  /// the published `isVerified` must say.
+  final bool Function() _isPhoneVerified;
+
   DocumentReference<Map<String, dynamic>> _profileOf(String uid) =>
       _firestore.collection('users').doc(uid);
+
+  DocumentReference<Map<String, dynamic>> _publicOf(String uid) =>
+      _firestore.collection('publicProfiles').doc(uid);
 
   DocumentReference<Map<String, dynamic>> _claimOf(String key) =>
       _firestore.collection('usernames').doc(key);
@@ -141,7 +219,12 @@ class FirebaseProfileRepository implements ProfileRepository {
   /// One transaction, so two accounts can never end up with the same name:
   /// if either claim changes before it commits, Firestore runs it again.
   @override
-  Future<void> saveProfile(String uid, User profile) async {
+  Future<void> saveProfile(
+    String uid,
+    User profile, {
+    ProfileVisibility visibility = const ProfileVisibility(),
+  }) async {
+    final isVerified = _isPhoneVerified();
     final saved = await _guard(
       () => _firestore.runTransaction<bool>((transaction) async {
         // Every read comes before any write, as transactions require.
@@ -188,10 +271,35 @@ class FirebaseProfileRepository implements ProfileRepository {
           if (!current.exists) 'createdAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
+        // Replaced whole, so anything no longer shared is removed.
+        transaction.set(_publicOf(uid), {
+          ...ProfileDocument.toPublicData(
+            uid,
+            profile,
+            visibility,
+            isVerified: isVerified,
+          ),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
         return true;
       }),
     );
     if (!saved) throw ProfileException.usernameTaken;
+  }
+
+  @override
+  Future<Map<String, User>> fetchPublicProfiles(Iterable<String> uids) async {
+    // One read per member, side by side; a failed read is left out.
+    final results = await Future.wait([
+      for (final uid in {...uids})
+        _publicOf(uid).get().then<MapEntry<String, User>?>((snapshot) {
+          final data = snapshot.data();
+          return data == null
+              ? null
+              : MapEntry(uid, ProfileDocument.fromPublicData(uid, data));
+        }, onError: (Object _) => null),
+    ]);
+    return Map.fromEntries(results.whereType<MapEntry<String, User>>());
   }
 
   @override
@@ -205,6 +313,8 @@ class FirebaseProfileRepository implements ProfileRepository {
       // Only a name this account holds is ever freed.
       if (owner == uid) transaction.delete(_claimOf(key));
       if (current.exists) transaction.delete(_profileOf(uid));
+      // Deleting a public profile that was never published is harmless.
+      transaction.delete(_publicOf(uid));
     }),
   );
 
@@ -241,9 +351,13 @@ class FirebaseProfileRepository implements ProfileRepository {
 class DemoProfileRepository implements ProfileRepository {
   /// [profiles] start without claims, like accounts created before claims
   /// existed; [claims] maps usernames (any case) to the uid holding them.
+  ///
+  /// [profiles] also start without public profiles, like accounts made
+  /// before public profiles existed.
   DemoProfileRepository({
     Map<String, User>? profiles,
     Map<String, String>? claims,
+    this.isPhoneVerified = true,
   }) : _data = {
          for (final MapEntry(:key, :value) in (profiles ?? {}).entries)
            key: ProfileDocument.toData(key, value),
@@ -256,10 +370,28 @@ class DemoProfileRepository implements ProfileRepository {
   // Stored as data so it behaves like Firestore: a saved profile is a copy.
   final Map<String, Map<String, dynamic>> _data;
   final Map<String, String> _claims;
+  final Map<String, Map<String, dynamic>> _public = {};
+
+  /// Whether accounts count as verified by phone when published.
+  final bool isPhoneVerified;
 
   /// The uid holding [username], or null if it is free.
   String? ownerOf(String username) =>
       _claims[ProfileDocument.usernameKey(username)];
+
+  /// A copy of what is published for [uid], or null if nothing is.
+  Map<String, dynamic>? publicDataOf(String uid) {
+    final data = _public[uid];
+    return data == null ? null : {...data};
+  }
+
+  @override
+  Future<Map<String, User>> fetchPublicProfiles(Iterable<String> uids) async =>
+      {
+        for (final uid in uids)
+          if (_public[uid] case final data?)
+            uid: ProfileDocument.fromPublicData(uid, data),
+      };
 
   @override
   Future<User?> fetchProfile(String uid) async {
@@ -268,7 +400,11 @@ class DemoProfileRepository implements ProfileRepository {
   }
 
   @override
-  Future<void> saveProfile(String uid, User profile) async {
+  Future<void> saveProfile(
+    String uid,
+    User profile, {
+    ProfileVisibility visibility = const ProfileVisibility(),
+  }) async {
     final stored = _data[uid];
     final oldUsername = stored == null
         ? ''
@@ -285,10 +421,17 @@ class DemoProfileRepository implements ProfileRepository {
     if (claim != null) _claims[claim] = uid;
     _claims.remove(change.release);
     _data[uid] = {...stored ?? {}, ...ProfileDocument.toData(uid, profile)};
+    _public[uid] = ProfileDocument.toPublicData(
+      uid,
+      profile,
+      visibility,
+      isVerified: isPhoneVerified,
+    );
   }
 
   @override
   Future<void> deleteProfile(String uid) async {
+    _public.remove(uid);
     final stored = _data.remove(uid);
     if (stored == null) return;
     final key = ProfileDocument.usernameKey(

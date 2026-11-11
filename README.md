@@ -17,16 +17,16 @@ Souq Skills is a Flutter marketplace where members in Saudi Arabia trade skills 
 
 | Area | Features |
 |---|---|
-| Account | Phone sign-in or sign-up from one entry point with Firebase Authentication (SMS code), first and last name, username unique across all members, location from a list or the device, private location option, editable profile and skills saved to Firestore, code verification for a new phone number, sign out, delete account (also removes the member's listings and saved skills) |
+| Account | Phone sign-in or sign-up from one entry point with Firebase Authentication (SMS code), first and last name, username unique across all members, location from a list or the device, private location option, editable profile and skills saved to Firestore, code verification for a new phone number, sign out, delete account after verifying the phone number again (also removes the member's listings, saved skills, blocks, profile, public profile and username; ratings and reports are kept) |
 | Discover | Skill feed on Home loaded from Firestore, with pull to refresh, search as you type, filters for category, city and tags, and saved skills kept per member |
 | Posting | Solo listings with Online only and Women only tags, shared with all members through Firestore, and group trades, from one page of selections, with edit, pause, and delete by the owner only |
 | Trading | Proposals with accept, counter and decline on the proposal card, offering a skill or wallet credits, scheduling, completion, disputes |
-| Rating | Star rating with one-tap feedback after an exchange, shown on the profile |
+| Rating | Star rating with one-tap feedback after an exchange, saved online for real members (once per member), shown on profiles, cards and the Ratings screen, and private while the member's public profile is off |
 | Profile | Rating, badges earned from real activity, reviews given and received, skills |
 | Group trades | Invite only: create, invite by username, accept or decline, group chat, completion, rating |
 | Chat | Direct and group chats with one-tap replies |
 | Wallet | Balance, credits on hold for active trades, hide or show, credit history |
-| Safety | Report a member or trade, send a complaint and get a confirmation, block and unblock, track cases |
+| Safety | Report a member or trade with optional details (sent online, once per member or trade), optionally block the member afterwards, send a complaint and get a confirmation, block and unblock, track cases in the Safety Centre |
 | Settings | Edit profile, dark mode, notification and privacy switches on one page |
 
 **Complete end-to-end flow with a stored result:** sign in → open a trade → mark it complete (credits are added) → rate it → see the rating and badges on the profile → restart the app and the result is still there.
@@ -56,7 +56,7 @@ flutter run -d chrome        # or: flutter run -d <android-device-id>
 firebase deploy --only firestore:rules --project souq-skills
 ```
 
-**Resetting.** To clear what is kept on one device, clear the browser's site data or the app's storage. Accounts, profiles, usernames, listings and saved skills live in Firestore and are removed with **Delete account**.
+**Resetting.** To clear what is kept on one device, clear the browser's site data or the app's storage. Accounts, profiles, public profiles, usernames, listings, saved skills and blocks live in Firestore and are removed with **Delete account**; reports and ratings sent online are kept.
 
 ## Testing
 
@@ -87,6 +87,11 @@ flutter test
 | `test/listing_loading_test.dart` | Loading and refreshing listings, empty and error states, account switching, search and filters on loaded listings |
 | `test/saved_listings_repository_test.dart`, `test/saved_listings_test.dart` | Saving per member, failures, rapid taps, refresh, sign-in again, account switching, deleted listings |
 | `test/account_deletion_cleanup_test.dart` | Deleting an account removes only its own listings and saved skills, and stops safely if that fails |
+| `test/account_deletion_reauth_test.dart` | Verifying the phone number again before deleting: success, a wrong code, going back, a code that cannot be sent, the time limit, and that no account data is removed until it succeeds |
+| `test/public_profile_repository_test.dart` | What a public profile shares (never the phone), hidden profiles and locations, reading other members |
+| `test/public_profile_test.dart` | Publishing at sign-up, edits and the *Public profile* switch, owner names on listings, fetching each member once, failures, account switching, publishing older accounts at sign-in |
+| `test/blocked_members_repository_test.dart`, `test/blocking_test.dart` | Blocking and unblocking online first, what a block hides (Home, Saved skills, listing details, profiles), the Blocked members screen, load failures with retry, account switching, account deletion, and chat and group-invite filters |
+| `test/report_repository_test.dart`, `test/reports_test.dart` | What a report stores, fixed ids and duplicates, reporting members, trades and complaints online first, failures and retry, optional details and blocking afterwards, the online dispute method, the Safety Centre states, account switching, and keeping reports after account deletion |
 
 ### Firestore security rules
 
@@ -100,10 +105,13 @@ firebase emulators:exec --only firestore --project demo-souq-skills "npm --prefi
 
 `firestore_rules_test/rules.test.mjs` repeats the app's own Firestore reads and writes. It checks what members may do and what is refused for:
 
-- profiles;
+- profiles and public profiles;
 - usernames;
 - listings;
 - saved listings;
+- blocked members;
+- reports;
+- reviews, and the *Public profile* switch that hides them;
 - account deletion cleanup.
 
 ### Manual
@@ -125,7 +133,7 @@ firebase emulators:exec --only firestore --project demo-souq-skills "npm --prefi
     - Sign out and sign in as account B. The listing appears on Home, and opening it shows no owner options (edit, pause, delete).
     - Save it with the heart: it appears under Profile → Saved skills for B only.
     - Sign back in as A: B's saved skills are not shown.
-14. **Delete account:** Profile → Settings → **Delete account**. The account's listings disappear for other members, and its username can be taken again.
+14. **Delete account:** Profile → Settings → **Delete account**, then enter the code sent to the account's phone number. The account's listings disappear for other members, and its username can be taken again.
 
 ## Architecture
 
@@ -147,14 +155,62 @@ souq_skills/lib/
 | Data | Where | Interface |
 |---|---|---|
 | Sign-in | Firebase Authentication (phone) | `AuthRepository` |
-| Profiles | Firestore `users/{uid}` | `ProfileRepository` |
+| Profiles | Firestore `users/{uid}`, private to the member | `ProfileRepository` |
+| Public profiles | Firestore `publicProfiles/{uid}`: names, username and, unless *Public profile* or the location is off, city, bio, skills and availability; never the phone. Saved in the same transaction as the profile, readable by signed-in members one at a time | `ProfileRepository`, `MemberService` |
 | Usernames | Firestore `usernames/{username}`, claimed in the same transaction as the profile | `ProfileRepository` |
 | Listings | Firestore `listings/{listingId}`, with the owner's uid | `ListingRepository` |
 | Saved skills | Firestore `users/{uid}/saved/{listingId}`, private to each member | `SavedListingsRepository` |
+| Blocked members | Firestore `users/{uid}/blocked/{blockedUid}`, private to the member who blocked; only real accounts, never oneself. Blocks of the built-in demo members stay on the device | `BlockedMembersRepository`, `SafetyService` |
+| Reports | Firestore `reports/{reportId}`; see *Reports* below | `ReportRepository`, `SafetyService` |
+| Reviews | Firestore `reviews/{reviewId}`; see *Ratings and badges* below | `ReviewRepository`, `ReviewService` |
+
+**Reports.** Each report is one document in the top-level `reports` collection:
+
+| Field | Value |
+|---|---|
+| `reporterId` | The reporter's Firebase uid |
+| `kind` | `memberReport`, `tradeReport`, `tradeDispute` or `complaint` |
+| `reason` | One of the fixed reasons offered (at most 60 characters) |
+| `details` | Optional, at most 500 characters; left out when empty |
+| `memberId` | Member reports only: the reported member's uid |
+| `tradeId` | Trade reports and disputes only: the trade's id **on the reporter's device** |
+| `listingId` | Optional, when a listing is involved |
+| `status` | `submitted` when sent |
+| `createdAt` | Server time |
+
+- **One report per target.** A member report, trade report or dispute has the fixed id `{reporterUid}_{kind}_{targetId}`, so the same member or trade can be reported once per kind, even after it is resolved. The app says "You already reported this member" (or trade), and the rules refuse a second one too. Complaints get a new id each.
+- **Security.** Only the reporter can read their own reports, and lists must be filtered by their `reporterId`. Nobody can change or delete a report from the app. Reports cannot be sent as someone else, about oneself, or about an account that does not exist (demo ids included).
+- **Moderation.** Changing a report's status needs trusted server-side access (the Admin SDK or the Firebase Console); the app only reads it.
+- **Account deletion keeps reports.** They stay for moderation after the reporter or the reported member deletes their account.
+- **Demo members.** Reports about the built-in demo members, and every report in the offline demo, stay on the device, with the same once-per-target rule.
+- **Sent first, shown after.** A report is only shown as received, and the Safety Centre only lists it, once it has been saved online. After reporting a member, blocking them is offered but never done automatically; if blocking fails, the report still counts.
+
+**Ratings and badges.** Each rating of a real member is one document in the top-level `reviews` collection, by uid only:
+
+| Field | Value |
+|---|---|
+| `reviewerId` | The reviewer's Firebase uid |
+| `subjectId` | The rated member's Firebase uid; never the reviewer |
+| `rating` | A whole number from 1 to 5 |
+| `tags` | Up to five of the fixed feedback options, each once (there is no free-text comment) |
+| `contextId` | The trade or group trade's id **on the reviewer's device** |
+| `contextKind` | `trade` or `groupTrade` |
+| `skillTitle` | Optional, at most 100 characters |
+| `createdAt` | Server time |
+
+- **Once per member, for now.** The id is `{reviewerUid}_{subjectUid}`, so each member can rate another member once; the app says "You already rated this member", and the rules refuse a second one. Once trades are in Firebase this can become once per completed trade (for example `{tradeId}_{reviewerUid}`), checked by the server.
+- **Security.** Ratings cannot be sent as someone else, about oneself, about an account that does not exist (demo ids included), with a rating outside 1–5, unknown tags or extra fields. Nobody can change or delete a rating from the app.
+- **Visibility.** A member's ratings follow their *Public profile* switch, which is stored as `profileVisible` in `publicProfiles/{uid}`; when it is off, the rules also require the rest of the public profile to be blank. Others can only list a member's ratings while it is on, and see "Ratings are private" otherwise. The member always sees the ratings they received, and each reviewer the ratings they wrote. Hiding never deletes ratings.
+- **Sent first, shown after.** *Submit rating* shows *Saving…* and ignores further taps; the rating is only kept on the device, and shown, once saved online. On failure the screen explains what happened, keeps the stars and tags, and offers *Try again*. A rating that finishes after another account signed in is not shown.
+- **Loading.** `ReviewService.refreshReviews` loads the member's own given and received ratings, and other members' ratings once per account in the background when listings load or a profile opens. The *Ratings and reviews* screen loads again each time it opens and on pull to refresh, with loading, empty and error states. Ratings loaded for one account are never shown to another.
+- **Account deletion keeps ratings,** both given and received, so nobody can erase bad ratings by deleting their account. A deleted reviewer is shown as "Member". A deleted member's public profile is gone, so their received ratings are no longer shown to others.
+- **Deleting an account asks for the phone number again.** Firebase only deletes an account that signed in recently, so *Delete account* first sends a code to the account's own number. Nothing is deleted until it is verified; a wrong code, going back, or a code that cannot be sent leaves the member signed in with all their data. The check counts for four minutes, within Firebase's five, and only for the account that passed it. The offline demo deletes without it.
+- **Demo members.** Ratings of the built-in demo members, and every rating in the offline demo, stay on the device, once per exchange as before, and the demo member still rates back.
+- **Badges** are worked out from activity and never stored online; they are taken away if the activity no longer qualifies (for example, fewer ratings after a refresh). Each badge is announced once per account. *Top Rated* and *Helpful Reviewer* count the ratings received and given, online ones included; *First Exchange* and *Trusted Trader* count trades on the device; *Skill Sharer* counts the member's listings; *Community Builder* counts group trades on the device.
 
 Changes to these are saved online first and only then shown on the device. On failure the screen explains what happened, and nothing changes. The services translate between the member's Firebase uid and the app's local id for the current member (`'me'`) at this boundary. A different account signing in on the same device never sees the previous account's data.
 
-Everything else is still kept on the device only: trades, proposals, chats, group trades, wallet, reviews, notifications, safety reports and settings. `AppDataSource` is implemented by `LocalDataSource` using `shared_preferences`, and every change is saved as a JSON snapshot.
+Everything else is still kept on the device only: trades, proposals, chats, group trades, the wallet, notifications, app settings (such as dark mode), disputes opened from a trade, and the built-in demo members' reviews, blocks and reports. `AppDataSource` is implemented by `LocalDataSource` using `shared_preferences`, and every change is saved as a JSON snapshot.
 
 | State | Behaviour |
 |---|---|
@@ -179,7 +235,7 @@ Everything else is still kept on the device only: trades, proposals, chats, grou
 | `flutter` | Framework and navigation |
 | `firebase_core` | Connecting to the Firebase project |
 | `firebase_auth` | Phone sign-in with SMS verification |
-| `cloud_firestore` | Profiles, usernames, listings and saved skills |
+| `cloud_firestore` | Profiles, usernames, listings, saved skills, blocks, reports and reviews |
 | `shared_preferences` | On-device storage for everything else |
 | `geolocator` | Reading the device's location to fill in the nearest city |
 | `flutter_test`, `flutter_lints` | Tests and static analysis (development only) |
@@ -187,13 +243,21 @@ Everything else is still kept on the device only: trades, proposals, chats, grou
 
 ## Known issues and limitations
 
-- **Only part of the data is shared.** Accounts, profiles, usernames, listings and saved skills are in Firebase. Trades, proposals, chats, group trades, the wallet, reviews, notifications and safety reports still stay on one device.
+- **Only part of the data is shared.** Accounts, profiles, public profiles, usernames, listings, saved skills, blocks, reports and complaints, and ratings of real members are in Firebase. Trades, proposals, chats, group trades, the wallet, notifications, disputes opened from a trade, and everything about the built-in demo members still stay on one device.
 - **Other members are simulated** for the features that stay on the device. `MemberSimulator` accepts proposals after about 30 seconds, and within about 2 seconds replies in chat, accepts group invitations and returns a 5-star rating.
-- **Listing cards show "Member" and no rating for real owners,** because member names and ratings are not shared yet.
+- **Ratings are not tied to a verified trade.** Trades are still kept on each device, so the server cannot confirm that the trade in `contextId` exists, finished, or included both members. Any signed-in member can rate any real member once. Server-side trade completion and participant checks are needed once trades move to Firebase.
+- **One rating per member, not per trade.** Rating the same member after a second exchange is refused, so the trade screen may still offer *Rate* for that exchange; the rating screen then says *Already rated*.
+- **Trade badges count device trades only.** *First Exchange*, *Trusted Trader* and *Community Builder* follow trades and group trades on the device until those are in Firebase.
+- **Other members' ratings are loaded once per account;** new ratings of others show after the app is restarted, while the member's own show when the Ratings screen opens.
+- A member whose public profile is not published yet (an older account before it next signs in) is shown as "Member".
 - **Listings refresh when Home opens and when pulled down,** not live, and all listings are loaded at once.
 - **Device location picks the nearest listed city,** even if the member is outside Saudi Arabia.
 - **Push notifications are in-app only.**
-- **The Public profile switch is stored but has no visible effect,** because there are no other real viewers yet.
+- **Other members' public profiles are fetched once and then kept on the device;** changes they make show after the app is restarted on a new account or the copy is refreshed.
+- **Blocking is one-way and silent.** A blocked member is not told, and still sees the listings of the member who blocked them. Blocking hides their listings on Home and in Saved skills, and on their listing and profile it offers only Unblock.
+- **Blocked members can still be reached from chats and trades.** Those features stay on the device and only hide blocked members from the chat list and group invites; they do not check blocks on the server.
+- **Trade ids in reports are not checked.** Trades are still kept on each device, so a trade report or dispute stores the reporter's local trade id. The server cannot confirm that the trade exists or that the reporter took part, until trades move to Firebase.
+- **Disputes still stay on the device.** The *Open a dispute* screen (trade flow) calls the device-only `SafetyService.disputeTrade`. `SafetyService.submitTradeDispute` sends the dispute online first and only then marks the trade as disputed; the dispute screen needs to switch to it, awaiting it and showing its errors, before disputes are shared online.
 - **A manual check on a physical device has not been recorded,** including the device location permission prompt. Automated tests and a web build pass.
 
 ## Progress reports

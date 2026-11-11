@@ -8,8 +8,21 @@ rules_version = '2';
 // users/{uid}/saved/{listingId}
 //                      The listings this member saved: { listingId, savedAt }.
 //                      Private to the member, like the profile.
+// users/{uid}/blocked/{blockedUid}
+//                      Members this member blocked: { blockedUid, blockedAt }.
+//                      Private to the member; never oneself.
+// publicProfiles/{uid} What other signed-in members may see: names,
+//                      username and, if shared, city, bio, skills and
+//                      availability. Never the phone; kept in step with
+//                      users/{uid} in the same transaction.
 // usernames/{key}      One claim per username, keyed by its trimmed,
 //                      lower-case form: { uid, username, claimedAt }.
+// reviews/{reviewId}   Ratings, once per member pair; readable by the two
+//                      members, and by others only while the rated member's
+//                      public profile is switched on.
+// reports/{reportId}   Reports, complaints and disputes; each member can
+//                      only send and read their own, and nobody can change
+//                      or delete them from the app.
 // listings/{listingId} Skill listings every signed-in member can browse;
 //                      only the owner (`ownerId`, their uid) can change or
 //                      delete them. Never holds whether anyone saved it.
@@ -41,6 +54,10 @@ service cloud.firestore {
 
     function profilePath(uid) {
       return /databases/$(database)/documents/users/$(uid);
+    }
+
+    function publicProfilePath(uid) {
+      return /databases/$(database)/documents/publicProfiles/$(uid);
     }
 
     // A username as shown in a profile (any case).
@@ -85,8 +102,11 @@ service cloud.firestore {
                          request.resource.data.username)
             || releasedByCaller(resource.data.get('username', '')));
 
+      // The public profile goes in the same write, so it never outlives
+      // the profile it shows.
       allow delete: if isOwner(uid)
-        && releasedByCaller(resource.data.get('username', ''));
+        && releasedByCaller(resource.data.get('username', ''))
+        && !existsAfter(publicProfilePath(uid));
 
       // users/{uid}/saved/{listingId}  The listings this member saved, as
       // written by lib/data/saved_listings_repository.dart: only
@@ -103,6 +123,27 @@ service cloud.firestore {
 
         // Also allowed once the listing is gone, so references to deleted
         // listings can be cleaned up.
+        allow delete: if isOwner(uid);
+      }
+
+      // users/{uid}/blocked/{blockedUid}  Members this member blocked, as
+      // written by lib/data/blocked_members_repository.dart: only
+      // { blockedUid, blockedAt }. Private to the member; the blocked
+      // member is never told.
+      match /blocked/{blockedUid} {
+        allow get, list: if isOwner(uid);
+
+        // Blocking again overwrites the same document, which is an update.
+        // Only real accounts, never oneself.
+        allow create, update: if isOwner(uid)
+          && blockedUid != uid
+          && blockedUid.size() <= 128
+          && request.resource.data.keys().hasOnly(['blockedUid', 'blockedAt'])
+          && request.resource.data.blockedUid == blockedUid
+          && request.resource.data.blockedAt == request.time
+          && exists(profilePath(blockedUid));
+
+        // Also once the other account is gone, so blocks can be removed.
         allow delete: if isOwner(uid);
       }
     }
@@ -133,6 +174,66 @@ service cloud.firestore {
         && resource.data.uid == request.auth.uid
         && (!existsAfter(profilePath(request.auth.uid))
             || !sameUsername(getAfter(profilePath(request.auth.uid)).data.username, key));
+    }
+
+    // publicProfiles/{uid}  What other signed-in members may see of a member,
+    //                       written in the same transaction as users/{uid}
+    //                       by lib/data/profile_repository.dart
+    //                       (ProfileDocument.toPublicData). Never the phone.
+
+    function publicProfileFields() {
+      return ['uid', 'firstName', 'lastName', 'username', 'city', 'bio',
+              'skillsOffered', 'skillsWanted', 'availability', 'isVerified',
+              'profileVisible', 'updatedAt'];
+    }
+
+    // [value] is the private profile's [mine], or left out as [blank].
+    function sharedOrHidden(value, mine, blank) {
+      return value == mine || value == blank;
+    }
+
+    // The public profile shows only what the member's own private profile
+    // holds after this write, or less, so it can never claim another name
+    // or show anything the member does not have. Without a valid private
+    // profile, getAfter finds nothing and the write is refused.
+    function isValidPublicProfile(uid) {
+      let data = request.resource.data;
+      let mine = getAfter(profilePath(uid)).data;
+      return data.keys().hasOnly(publicProfileFields())
+        && data.keys().hasAll(publicProfileFields())
+        && data.uid == uid
+        && mine.id == uid
+        && isUsername(mine.username)
+        && claimedByCaller(mine.username)
+        && data.firstName is string && data.firstName == mine.firstName
+        && data.lastName is string && data.lastName == mine.lastName
+        && data.username == mine.username
+        && data.city is string && sharedOrHidden(data.city, mine.city, '')
+        && data.bio is string && sharedOrHidden(data.bio, mine.bio, '')
+        && data.skillsOffered is list
+        && sharedOrHidden(data.skillsOffered, mine.skillsOffered, [])
+        && data.skillsWanted is list
+        && sharedOrHidden(data.skillsWanted, mine.skillsWanted, [])
+        && data.availability is string
+        && sharedOrHidden(data.availability, mine.availability, '')
+        // Verified means signed in with a phone number, not a stored flag.
+        && data.isVerified == (request.auth.token.get('phone_number', null) is string)
+        // Public profile switch: when off, only names and username are
+        // shared, and the member's reviews are not shown to others.
+        && data.profileVisible is bool
+        && (data.profileVisible
+            || (data.city == '' && data.bio == '' && data.skillsOffered == []
+                && data.skillsWanted == [] && data.availability == ''))
+        && data.updatedAt == request.time;
+    }
+
+    match /publicProfiles/{uid} {
+      // Read one member at a time; there is no member directory to list.
+      allow get: if signedIn();
+      allow list: if false;
+
+      allow create, update: if isOwner(uid) && isValidPublicProfile(uid);
+      allow delete: if isOwner(uid);
     }
 
     // listings/{listingId}  Skill listings every member can browse, written
@@ -198,6 +299,141 @@ service cloud.firestore {
 
       allow delete: if signedIn()
         && resource.data.ownerId == request.auth.uid;
+    }
+
+    // reports/{reportId}  Reports, complaints and disputes, as written by
+    //                     lib/data/report_repository.dart. Each member can
+    //                     only send and read their own. Nobody can change or
+    //                     delete one from the app: they are kept for
+    //                     moderation, also after the reporter's account is
+    //                     deleted, and their status is changed only by
+    //                     trusted server-side tools.
+    //
+    // A member, trade or dispute report has the fixed id
+    // {reporterUid}_{kind}_{targetId}, so each can be sent only once:
+    // writing over an existing report is an update, which is refused.
+    // Trade ids are those on the reporter's device for now; they are not
+    // checked, as trades are not shared online yet.
+
+    function reportFields() {
+      return ['reporterId', 'kind', 'reason', 'details', 'memberId',
+              'tradeId', 'listingId', 'status', 'createdAt'];
+    }
+
+    function isSafeId(id) {
+      return id is string && id.matches('^[A-Za-z0-9_-]{1,128}$');
+    }
+
+    function isMemberReport(reportId, data) {
+      return data.keys().hasAll(['memberId'])
+        && !data.keys().hasAny(['tradeId'])
+        && isSafeId(data.memberId)
+        && data.memberId != request.auth.uid
+        // A real account: never a demo id or a made-up one.
+        && exists(profilePath(data.memberId))
+        && reportId == request.auth.uid + '_memberReport_' + data.memberId;
+    }
+
+    function isTradeReport(reportId, data) {
+      return data.keys().hasAll(['tradeId'])
+        && !data.keys().hasAny(['memberId'])
+        && isSafeId(data.tradeId)
+        && reportId == request.auth.uid + '_' + data.kind + '_' + data.tradeId;
+    }
+
+    function isComplaint(data) {
+      return !data.keys().hasAny(['memberId', 'tradeId']);
+    }
+
+    function isValidReport(reportId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly(reportFields())
+        && data.keys().hasAll(['reporterId', 'kind', 'reason', 'status', 'createdAt'])
+        && data.reporterId == request.auth.uid
+        && data.reason is string
+        && data.reason.size() >= 1 && data.reason.size() <= 60
+        && (!data.keys().hasAny(['details'])
+            || (data.details is string && data.details.size() <= 500))
+        && (!data.keys().hasAny(['listingId']) || isSafeId(data.listingId))
+        && data.status == 'submitted'
+        && data.createdAt == request.time
+        && ((data.kind == 'memberReport' && isMemberReport(reportId, data))
+            || ((data.kind == 'tradeReport' || data.kind == 'tradeDispute')
+                && isTradeReport(reportId, data))
+            || (data.kind == 'complaint' && isComplaint(data)));
+    }
+
+    match /reports/{reportId} {
+      // Lists must be filtered by the caller's own reporterId.
+      allow get, list: if signedIn()
+        && resource.data.reporterId == request.auth.uid;
+
+      allow create: if signedIn() && isValidReport(reportId);
+
+      allow update, delete: if false;
+    }
+
+    // reviews/{reviewId}  Ratings members give each other, as written by
+    //                     lib/data/review_repository.dart. Stored by uid
+    //                     only: no names, phone or other profile data.
+    //
+    // For now each member can rate another member once: the id is
+    // {reviewerUid}_{subjectUid}, so writing a second is an update, which is
+    // refused. Trades are still kept on each device, so `contextId` (the
+    // trade or group) is not checked: the server cannot yet confirm the
+    // trade happened, was completed, or included both members.
+    //
+    // A member's received reviews can be read by the member themselves and
+    // by the reviewer; anyone else only while the member's public profile
+    // is published with the Public profile switch on. They are kept, not
+    // deleted, when either account is deleted.
+
+    function ratingTags() {
+      return ['Great teacher', 'On time', 'Friendly', 'Well prepared',
+              'Would trade again'];
+    }
+
+    // The member's public profile exists and is switched on.
+    function isPublicProfile(uid) {
+      return exists(publicProfilePath(uid))
+        && get(publicProfilePath(uid)).data.get('profileVisible', false) == true;
+    }
+
+    function canReadReview(review) {
+      return signedIn()
+        && (review.reviewerId == request.auth.uid
+            || review.subjectId == request.auth.uid
+            || isPublicProfile(review.subjectId));
+    }
+
+    function isValidReview(reviewId) {
+      let data = request.resource.data;
+      return data.keys().hasOnly(['reviewerId', 'subjectId', 'rating', 'tags',
+                                  'contextId', 'contextKind', 'skillTitle',
+                                  'createdAt'])
+        && data.keys().hasAll(['reviewerId', 'subjectId', 'rating', 'tags',
+                               'contextId', 'contextKind', 'createdAt'])
+        && data.reviewerId == request.auth.uid
+        && isSafeId(data.subjectId)
+        && data.subjectId != request.auth.uid
+        // A real account: never a demo id or a made-up one.
+        && exists(profilePath(data.subjectId))
+        && reviewId == request.auth.uid + '_' + data.subjectId
+        && data.rating is int && data.rating >= 1 && data.rating <= 5
+        && data.tags is list && data.tags.size() <= 5
+        && data.tags.toSet().size() == data.tags.size()
+        && data.tags.hasOnly(ratingTags())
+        && isSafeId(data.contextId)
+        && data.contextKind in ['trade', 'groupTrade']
+        && (!data.keys().hasAny(['skillTitle'])
+            || (data.skillTitle is string && data.skillTitle.size() <= 100))
+        && data.createdAt == request.time;
+    }
+
+    match /reviews/{reviewId} {
+      allow get, list: if canReadReview(resource.data);
+      allow create: if signedIn() && isValidReview(reviewId);
+      allow update, delete: if false;
     }
   }
 }

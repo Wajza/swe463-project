@@ -17,8 +17,16 @@ class ComplaintScreen extends StatelessWidget {
         intro: 'Choose what your complaint is about.',
         reasons: AppOptions.complaintTopics,
         submitLabel: 'Send complaint',
-        onSubmit: (topic) {
-          SafetyService().fileComplaint(topic);
+        askDetails: true,
+        // Confirmed only once it was saved.
+        onSend: (topic, details) async {
+          try {
+            await SafetyService().fileComplaint(topic, details: details);
+          } on ReportException catch (error) {
+            if (context.mounted) context.showMessage(error.message);
+            return;
+          }
+          if (!context.mounted) return;
           context.back();
           context.showMessage(SafetyService.complaintReceivedMessage);
         },

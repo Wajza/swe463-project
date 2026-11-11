@@ -87,6 +87,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           availability: _availability,
           city: _city,
         ),
+        // The public profile shows the city only as now chosen.
+        locationVisible: !_keepLocationPrivate,
       );
     } on ProfileException catch (error) {
       if (mounted) {

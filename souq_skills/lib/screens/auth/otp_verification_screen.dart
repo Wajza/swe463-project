@@ -40,6 +40,12 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
         if (mounted) context.back(true);
         return;
       }
+      if (widget.request.purpose == OtpPurpose.confirmIdentity) {
+        // Stays signed in, and on this screen, if the code is wrong.
+        await AuthService().confirmIdentity(code);
+        if (mounted) context.back(true);
+        return;
+      }
       // New and returning members verify the same way; the saved profile
       // decides where they go next.
       final hasProfile = await AuthService().verifyCode(code);

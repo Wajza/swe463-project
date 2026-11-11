@@ -1,10 +1,12 @@
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:souq_skills/data/auth_repository.dart';
 import 'package:souq_skills/data/device_account_store.dart';
 import 'package:souq_skills/data/profile_repository.dart';
 import 'package:souq_skills/models/user.dart';
 
 import 'listing_service.dart';
+import 'profile_service.dart';
 import 'repository.dart';
 import 'seed_data.dart';
 
@@ -35,11 +37,29 @@ class AuthService {
   static DeviceAccountStore? _deviceAccount;
 
   /// Which account the data saved on this device belongs to.
-  static DeviceAccountStore get deviceAccount => _deviceAccount ??=
-      Firebase.apps.isEmpty
+  static DeviceAccountStore get deviceAccount =>
+      _deviceAccount ??= Firebase.apps.isEmpty
       ? MemoryDeviceAccountStore()
       : PrefsDeviceAccountStore();
   static set deviceAccount(DeviceAccountStore? value) => _deviceAccount = value;
+
+  /// Refused by [deleteAccount] until the member verified their phone
+  /// number again with [confirmIdentity].
+  static const identityCheckRequired = AuthException(
+    'For your security, verify your phone number again first.',
+  );
+
+  /// How long after [confirmIdentity] the account can be deleted. Firebase
+  /// allows five minutes after signing in; this is less, so that a deletion
+  /// started in time also finishes in time.
+  static const identityCheckWindow = Duration(minutes: 4);
+
+  /// The time now, replaceable in tests.
+  @visibleForTesting
+  static DateTime Function() clock = DateTime.now;
+
+  /// The account that last passed [confirmIdentity], and when.
+  static ({String uid, DateTime at})? _identityChecked;
 
   /// Signed in on this device and with the sign-in service.
   bool get isSignedIn => _repo.isSignedIn && repository.uid != null;
@@ -90,6 +110,9 @@ class AuthService {
     if (profile == null) return false;
     await _openAccount(uid, profile);
     signIn();
+    // Accounts from before public profiles get one now; signing in never
+    // waits for or depends on it.
+    ProfileService().publishIfMissing().ignore();
     return true;
   }
 
@@ -115,6 +138,7 @@ class AuthService {
       return;
     }
     await _openAccount(uid, profile);
+    ProfileService().publishIfMissing().ignore();
   }
 
   /// Shows [profile] as the current member. Data saved on this device for
@@ -193,7 +217,13 @@ class AuthService {
     if (profiles != null) {
       // Creates the profile and claims its username in one step: if the
       // name is taken, nothing is saved and the member can pick another.
-      await _profileStep(() => profiles.saveProfile(_signedInUid(), profile));
+      await _profileStep(
+        () => profiles.saveProfile(
+          _signedInUid(),
+          profile,
+          visibility: ProfileVisibility(showLocation: !keepLocationPrivate),
+        ),
+      );
     }
     createAccount(
       firstName: firstName,
@@ -237,13 +267,49 @@ class AuthService {
 
   /// Signs out on this device straight away, then with the sign-in service.
   Future<void> signOut() {
+    _identityChecked = null;
     _setSignedIn(false);
     return repository.signOut();
   }
 
+  /// Whether the member must verify their phone number again before
+  /// [deleteAccount]: always online, unless they just did.
+  bool get needsIdentityCheck {
+    if (!repository.requiresReauthentication) return false;
+    final checked = _identityChecked;
+    final uid = repository.uid;
+    return checked == null ||
+        uid == null ||
+        checked.uid != uid ||
+        clock().difference(checked.at) > identityCheckWindow;
+  }
+
+  /// Texts a code to the signed-in member's own number, for
+  /// [confirmIdentity]. Throws an [AuthException].
+  Future<void> sendIdentityCode() => repository.sendReauthenticationCode(
+    _international(_repo.currentUser.phone),
+  );
+
+  /// Confirms it is still the signed-in member with [code], so the account
+  /// can be deleted. Throws an [AuthException] and stays signed in if the
+  /// code is wrong; nothing else changes.
+  Future<void> confirmIdentity(String code) async {
+    final uid = _signedInUid();
+    await repository.reauthenticate(code);
+    // Another account signed in meanwhile: it has not been checked.
+    if (repository.uid != uid) return;
+    _identityChecked = (uid: uid, at: clock());
+  }
+
   /// Deletes the account and its profile. Throws an [AuthException] and
   /// keeps the member signed in if that fails.
+  ///
+  /// Online, the member must first verify their phone number again with
+  /// [confirmIdentity]; until then this throws [identityCheckRequired] and
+  /// deletes nothing, so no data is removed from an account that Firebase
+  /// would then refuse to delete.
   Future<void> deleteAccount() async {
+    if (needsIdentityCheck) throw identityCheckRequired;
     // The account's listings and saved listings go first, while it is still
     // signed in. If any may remain, nothing else is deleted, so no listing
     // is left behind that no one could remove; trying again finishes it.
@@ -261,6 +327,7 @@ class AuthService {
       await _profileStep(() => profiles.deleteProfile(_signedInUid()));
     }
     await repository.deleteAccount();
+    _identityChecked = null;
     _repo.hasAccount = false;
     _setSignedIn(false);
     await _rememberDeviceOwner(null);

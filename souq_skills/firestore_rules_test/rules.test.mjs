@@ -24,6 +24,7 @@ import {
   collection,
   deleteDoc,
   doc,
+  documentId,
   getDoc,
   getDocs,
   limit,
@@ -59,7 +60,11 @@ afterEach(() => env.clearFirestore());
 
 after(() => env.cleanup());
 
-const dbAs = (uid) => env.authenticatedContext(uid).firestore();
+/// Members sign in with a phone number, as in the app.
+const dbAs = (uid) =>
+  env.authenticatedContext(uid, { phone_number: '+966500000000' }).firestore();
+/// A signed-in account without a phone number, e.g. another sign-in method.
+const dbWithoutPhoneAs = (uid) => env.authenticatedContext(uid).firestore();
 const anonymousDb = () => env.unauthenticatedContext().firestore();
 
 /// What User.toJson() produces, as saved by ProfileDocument.toData.
@@ -100,9 +105,28 @@ async function read(path) {
 
 const usernameKey = (name) => name.trim().toLowerCase();
 
+/// Mirrors ProfileDocument.toPublicData.
+function publicData(uid, user, { showProfile = true, showLocation = true, isVerified = true } = {}) {
+  return {
+    uid,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    username: user.username,
+    city: showProfile && showLocation ? user.city : '',
+    bio: showProfile ? user.bio : '',
+    skillsOffered: showProfile ? user.skillsOffered : [],
+    skillsWanted: showProfile ? user.skillsWanted : [],
+    availability: showProfile ? user.availability : '',
+    isVerified,
+    profileVisible: showProfile,
+  };
+}
+
 /// Mirrors FirebaseProfileRepository.saveProfile. Resolves to false when
-/// the username is taken (nothing written), true when saved.
-function saveProfile(db, uid, user) {
+/// the username is taken (nothing written), true when saved. [visibility]
+/// is passed to publicData; [publish] false leaves out the public profile,
+/// as app versions from before public profiles did.
+function saveProfile(db, uid, user, visibility = {}, { publish = true } = {}) {
   return runTransaction(db, async (transaction) => {
     const userRef = doc(db, 'users', uid);
     const current = await transaction.get(userRef);
@@ -138,6 +162,12 @@ function saveProfile(db, uid, user) {
       },
       { merge: true },
     );
+    if (publish) {
+      transaction.set(doc(db, 'publicProfiles', uid), {
+        ...publicData(uid, user, visibility),
+        updatedAt: serverTimestamp(),
+      });
+    }
     return true;
   });
 }
@@ -154,6 +184,7 @@ function deleteProfile(db, uid) {
         : (await transaction.get(doc(db, 'usernames', key))).data()?.uid ?? null;
     if (owner === uid) transaction.delete(doc(db, 'usernames', key));
     if (current.exists()) transaction.delete(userRef);
+    transaction.delete(doc(db, 'publicProfiles', uid));
   });
 }
 
@@ -981,5 +1012,980 @@ describe('account deletion cleanup', () => {
 
     await assertFails(deleteAllListingsOf(anonymousDb(), ME));
     await assertFails(unsaveAll(anonymousDb(), ME));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Public profiles: publicProfiles/{uid}
+
+const publicRef = (db, uid) => doc(db, 'publicProfiles', uid);
+
+/// Writes only the public profile, as a client skipping the app would.
+const writePublicOnly = (db, uid, data) =>
+  setDoc(publicRef(db, uid), { ...data, updatedAt: serverTimestamp() });
+
+/// A rich private profile, so hidden fields have something to hide.
+const fullProfile = (username, extra = {}) =>
+  profile(username, {
+    bio: 'Teaches calligraphy.',
+    skillsWanted: ['Piano'],
+    availability: 'Weekends',
+    ...extra,
+  });
+
+describe('public profiles: what the rules must allow', () => {
+  test('signing up publishes a public profile without the phone', async () => {
+    await assertSucceeds(saveProfile(dbAs(ME), ME, fullProfile('maha_z')));
+
+    const shown = await read(`publicProfiles/${ME}`);
+    assert.equal('phone' in shown, false);
+    assert.equal('createdAt' in shown, false);
+    assert.equal(shown.username, 'maha_z');
+    assert.equal(shown.city, 'Jeddah');
+    assert.deepEqual(shown.skillsWanted, ['Piano']);
+    assert.equal(shown.isVerified, true);
+  });
+
+  test('any signed-in member can open a public profile', async () => {
+    await saveProfile(dbAs(ME), ME, fullProfile('maha_z'));
+
+    await assertSucceeds(getDoc(publicRef(dbAs(OTHER), ME)));
+    await assertSucceeds(getDoc(publicRef(dbAs(ME), ME)));
+    await assertSucceeds(getDoc(publicRef(dbAs(OTHER), 'nobody')));
+  });
+
+  test('edits, skills and renames update the public profile with the private one', async () => {
+    const db = dbAs(ME);
+    await saveProfile(db, ME, fullProfile('maha_z'));
+
+    await assertSucceeds(
+      saveProfile(db, ME, fullProfile('maha_z', { bio: 'New bio', skillsOffered: ['Calligraphy', 'Baking'] })),
+    );
+    await assertSucceeds(saveProfile(db, ME, fullProfile('Maha_Z')));
+    await assertSucceeds(saveProfile(db, ME, fullProfile('maha_2')));
+
+    const shown = await read(`publicProfiles/${ME}`);
+    assert.equal(shown.username, 'maha_2');
+    assert.equal(shown.bio, 'Teaches calligraphy.');
+    assert.equal((await read('usernames/maha_2')).uid, ME);
+  });
+
+  test('a hidden profile shares only names and username', async () => {
+    await assertSucceeds(saveProfile(dbAs(ME), ME, fullProfile('maha_z'), { showProfile: false }));
+
+    const shown = await read(`publicProfiles/${ME}`);
+    assert.equal(shown.firstName, 'Maha');
+    assert.equal(shown.lastName, 'Alzahrani');
+    assert.equal(shown.username, 'maha_z');
+    assert.equal(shown.city, '');
+    assert.equal(shown.bio, '');
+    assert.deepEqual(shown.skillsOffered, []);
+    assert.deepEqual(shown.skillsWanted, []);
+    assert.equal(shown.availability, '');
+  });
+
+  test('a private location leaves the city out', async () => {
+    await assertSucceeds(saveProfile(dbAs(ME), ME, fullProfile('maha_z'), { showLocation: false }));
+
+    const shown = await read(`publicProfiles/${ME}`);
+    assert.equal(shown.city, '');
+    assert.equal(shown.bio, 'Teaches calligraphy.');
+  });
+
+  test('an account from before public profiles publishes on its next save', async () => {
+    const db = dbAs(ME);
+    await saveProfile(db, ME, fullProfile('maha_z'), {}, { publish: false });
+    assert.equal(await read(`publicProfiles/${ME}`), undefined);
+
+    await assertSucceeds(saveProfile(db, ME, fullProfile('maha_z')));
+
+    assert.ok(await read(`publicProfiles/${ME}`));
+  });
+
+  test('deleting the account removes the public profile with the rest', async () => {
+    const db = dbAs(ME);
+    await saveProfile(db, ME, fullProfile('maha_z'));
+
+    await assertSucceeds(deleteProfile(db, ME));
+
+    assert.equal(await read(`publicProfiles/${ME}`), undefined);
+    assert.equal(await read(`users/${ME}`), undefined);
+    assert.equal(await read('usernames/maha_z'), undefined);
+  });
+
+  test('an account that never published can still be deleted', async () => {
+    const db = dbAs(ME);
+    await saveProfile(db, ME, fullProfile('maha_z'), {}, { publish: false });
+
+    await assertSucceeds(deleteProfile(db, ME));
+  });
+
+  test('without a phone sign-in, the profile is published as not verified', async () => {
+    await assertSucceeds(
+      saveProfile(dbWithoutPhoneAs(ME), ME, fullProfile('maha_z'), { isVerified: false }),
+    );
+
+    assert.equal((await read(`publicProfiles/${ME}`)).isVerified, false);
+  });
+});
+
+describe('public profiles: what the rules must refuse', () => {
+  test('signed-out visitors cannot read, and nobody can list, public profiles', async () => {
+    await saveProfile(dbAs(ME), ME, fullProfile('maha_z'));
+
+    await assertFails(getDoc(publicRef(anonymousDb(), ME)));
+    await assertFails(getDocs(collection(dbAs(OTHER), 'publicProfiles')));
+    await assertFails(getDocs(collection(dbAs(ME), 'publicProfiles')));
+  });
+
+  test('no public profile without a private profile', async () => {
+    await assertFails(writePublicOnly(dbAs(ME), ME, publicData(ME, fullProfile('maha_z'))));
+  });
+
+  test('no public profile for a private profile that holds no claimed username', async () => {
+    // A private profile written before claims, whose name nobody claimed.
+    await seed({ [`users/${ME}`]: { ...fullProfile('maha_z'), id: ME } });
+
+    await assertFails(writePublicOnly(dbAs(ME), ME, publicData(ME, fullProfile('maha_z'))));
+  });
+
+  test('once the private profile is valid, the public one may be republished on its own', async () => {
+    const db = dbAs(ME);
+    await saveProfile(db, ME, fullProfile('maha_z'));
+
+    await assertSucceeds(
+      writePublicOnly(db, ME, publicData(ME, fullProfile('maha_z'), { showProfile: false })),
+    );
+  });
+
+  test('the phone, or anything extra, is never published', async () => {
+    const db = dbAs(ME);
+    await saveProfile(db, ME, fullProfile('maha_z'));
+    const shown = publicData(ME, fullProfile('maha_z'));
+
+    await assertFails(writePublicOnly(db, ME, { ...shown, phone: '512345678' }));
+    await assertFails(writePublicOnly(db, ME, { ...shown, createdAt: new Date() }));
+    await assertFails(writePublicOnly(db, ME, { ...shown, admin: true }));
+    const { bio, ...withoutBio } = shown;
+    assert.equal(bio, 'Teaches calligraphy.');
+    await assertFails(writePublicOnly(db, ME, withoutBio));
+  });
+
+  test('nothing can be shown that the private profile does not hold', async () => {
+    const db = dbAs(ME);
+    await saveProfile(db, ME, fullProfile('maha_z'));
+    await saveProfile(dbAs(OTHER), OTHER, fullProfile('sami'));
+    const shown = publicData(ME, fullProfile('maha_z'));
+
+    for (const bad of [
+      { firstName: 'Sami' },
+      { lastName: 'Someone' },
+      { username: 'sami' },
+      { username: 'MAHA_Z' },
+      { city: 'Riyadh' },
+      { bio: 'Made up.' },
+      { skillsOffered: ['Flutter'] },
+      { skillsWanted: ['Piano', 'Oud lessons'] },
+      { availability: 'Mornings' },
+      { uid: OTHER },
+      { firstName: 7 },
+      { skillsOffered: 'Calligraphy' },
+    ]) {
+      await assertFails(writePublicOnly(db, ME, { ...shown, ...bad }), `${JSON.stringify(bad)} must be refused`);
+    }
+  });
+
+  test("a member cannot write or delete someone else's public profile", async () => {
+    await saveProfile(dbAs(ME), ME, fullProfile('maha_z'));
+    const db = dbAs(OTHER);
+
+    await assertFails(writePublicOnly(db, ME, publicData(ME, fullProfile('maha_z'), { showProfile: false })));
+    await assertFails(deleteDoc(publicRef(db, ME)));
+    assert.equal((await read(`publicProfiles/${ME}`)).bio, 'Teaches calligraphy.');
+  });
+
+  test('verified only means signed in with a phone number', async () => {
+    const shown = publicData(ME, fullProfile('maha_z'));
+    await saveProfile(dbAs(ME), ME, fullProfile('maha_z'));
+
+    await assertFails(writePublicOnly(dbWithoutPhoneAs(ME), ME, { ...shown, isVerified: true }));
+    await assertFails(writePublicOnly(dbAs(ME), ME, { ...shown, isVerified: false }));
+    await assertFails(writePublicOnly(dbAs(ME), ME, { ...shown, isVerified: 'yes' }));
+  });
+
+  test('the update time comes from the server', async () => {
+    const db = dbAs(ME);
+    await saveProfile(db, ME, fullProfile('maha_z'));
+
+    await assertFails(
+      setDoc(publicRef(db, ME), { ...publicData(ME, fullProfile('maha_z')), updatedAt: new Date(2020, 0, 1) }),
+    );
+    await assertFails(setDoc(publicRef(db, ME), publicData(ME, fullProfile('maha_z'))));
+  });
+
+  test('the private profile cannot be deleted while the public one stays', async () => {
+    const db = dbAs(ME);
+    await saveProfile(db, ME, fullProfile('maha_z'));
+
+    // Everything but the public profile, in one write.
+    const batch = writeBatch(db);
+    batch.delete(doc(db, 'usernames', 'maha_z'));
+    batch.delete(doc(db, 'users', ME));
+    await assertFails(batch.commit());
+    assert.ok(await read(`users/${ME}`));
+  });
+
+  test('in one transaction, the public profile can only show the private one after it', async () => {
+    const db = dbAs(ME);
+    await saveProfile(db, ME, fullProfile('maha_z'));
+
+    // Publishing a new bio while the private profile keeps the old one.
+    await assertFails(
+      runTransaction(db, async (transaction) => {
+        await transaction.get(doc(db, 'users', ME));
+        transaction.set(doc(db, 'users', ME), { bio: 'Teaches calligraphy.' }, { merge: true });
+        transaction.set(publicRef(db, ME), {
+          ...publicData(ME, fullProfile('maha_z', { bio: 'Newer bio' })),
+          updatedAt: serverTimestamp(),
+        });
+      }),
+    );
+    // The same change made to both in one transaction is fine.
+    await assertSucceeds(
+      runTransaction(db, async (transaction) => {
+        await transaction.get(doc(db, 'users', ME));
+        transaction.set(doc(db, 'users', ME), { bio: 'Newer bio' }, { merge: true });
+        transaction.set(publicRef(db, ME), {
+          ...publicData(ME, fullProfile('maha_z', { bio: 'Newer bio' })),
+          updatedAt: serverTimestamp(),
+        });
+      }),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Blocking: users/{uid}/blocked/{blockedUid}
+
+const blockedRef = (db, uid, blockedUid) => doc(db, 'users', uid, 'blocked', blockedUid);
+
+/// Mirrors FirebaseBlockedMembersRepository.block.
+const blockMember = (db, uid, blockedUid) =>
+  setDoc(blockedRef(db, uid, blockedUid), { blockedUid, blockedAt: serverTimestamp() });
+
+/// Mirrors FirebaseBlockedMembersRepository.unblock.
+const unblockMember = (db, uid, blockedUid) => deleteDoc(blockedRef(db, uid, blockedUid));
+
+/// Mirrors FirebaseBlockedMembersRepository.fetchBlockedIds.
+async function fetchBlockedIds(db, uid) {
+  const snapshot = await getDocs(collection(db, 'users', uid, 'blocked'));
+  return snapshot.docs.map((item) => item.id).sort();
+}
+
+/// Mirrors FirebaseBlockedMembersRepository.unblockAll.
+const unblockAll = (db, uid) => deleteInBatches(db, collection(db, 'users', uid, 'blocked'));
+
+/// Real accounts for [uids], as their private profiles.
+async function seedAccounts(...uids) {
+  const docs = {};
+  for (const uid of uids) docs[`users/${uid}`] = { ...profile(`user_${uid.slice(-4)}`), id: uid };
+  await seed(docs);
+}
+
+describe('blocking: what the rules must allow', () => {
+  test('a member blocks, lists and unblocks someone', async () => {
+    await seedAccounts(ME, OTHER);
+    const db = dbAs(ME);
+
+    await assertSucceeds(blockMember(db, ME, OTHER));
+    assert.deepEqual(await assertSucceeds(fetchBlockedIds(db, ME)), [OTHER]);
+    await assertSucceeds(getDoc(blockedRef(db, ME, OTHER)));
+    const stored = await read(`users/${ME}/blocked/${OTHER}`);
+    assert.deepEqual(Object.keys(stored).sort(), ['blockedAt', 'blockedUid']);
+
+    await assertSucceeds(unblockMember(db, ME, OTHER));
+    assert.deepEqual(await fetchBlockedIds(db, ME), []);
+  });
+
+  test('blocking again is allowed', async () => {
+    await seedAccounts(ME, OTHER);
+
+    await blockMember(dbAs(ME), ME, OTHER);
+    await assertSucceeds(blockMember(dbAs(ME), ME, OTHER));
+  });
+
+  test('each member has their own block list', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+
+    await blockMember(dbAs(ME), ME, OTHER);
+    await blockMember(dbAs(THIRD), THIRD, ME);
+
+    assert.deepEqual(await fetchBlockedIds(dbAs(ME), ME), [OTHER]);
+    assert.deepEqual(await fetchBlockedIds(dbAs(THIRD), THIRD), [ME]);
+  });
+
+  test('someone whose account is gone can still be unblocked', async () => {
+    await seedAccounts(ME, OTHER);
+    await blockMember(dbAs(ME), ME, OTHER);
+    await env.withSecurityRulesDisabled((context) =>
+      deleteDoc(doc(context.firestore(), 'users', OTHER)),
+    );
+
+    await assertSucceeds(unblockMember(dbAs(ME), ME, OTHER));
+    await assertSucceeds(unblockMember(dbAs(ME), ME, 'never-blocked'));
+  });
+
+  test('blocking never touches the blocked member or their data', async () => {
+    await seedAccounts(ME, OTHER);
+    const before = await read(`users/${OTHER}`);
+
+    await blockMember(dbAs(ME), ME, OTHER);
+
+    assert.deepEqual(await read(`users/${OTHER}`), before);
+    assert.deepEqual(await fetchBlockedIds(dbAs(OTHER), OTHER), []);
+  });
+});
+
+describe('blocking: what the rules must refuse', () => {
+  test('signed-out visitors can do nothing with block lists', async () => {
+    await seedAccounts(ME, OTHER);
+    await blockMember(dbAs(ME), ME, OTHER);
+    const db = anonymousDb();
+
+    await assertFails(getDoc(blockedRef(db, ME, OTHER)));
+    await assertFails(getDocs(collection(db, 'users', ME, 'blocked')));
+    await assertFails(blockMember(db, ME, OTHER));
+    await assertFails(unblockMember(db, ME, OTHER));
+  });
+
+  test("another member cannot read, add to, change or remove someone's block list", async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+    await blockMember(dbAs(ME), ME, OTHER);
+
+    for (const db of [dbAs(OTHER), dbAs(THIRD)]) {
+      await assertFails(getDoc(blockedRef(db, ME, OTHER)));
+      await assertFails(getDocs(collection(db, 'users', ME, 'blocked')));
+      await assertFails(blockMember(db, ME, THIRD));
+      await assertFails(blockMember(db, ME, OTHER));
+      await assertFails(unblockMember(db, ME, OTHER));
+    }
+    assert.deepEqual(await fetchBlockedIds(dbAs(ME), ME), [OTHER]);
+  });
+
+  test('a member cannot block themselves', async () => {
+    await seedAccounts(ME);
+
+    await assertFails(blockMember(dbAs(ME), ME, ME));
+  });
+
+  test('only real accounts can be blocked', async () => {
+    await seedAccounts(ME);
+
+    await assertFails(blockMember(dbAs(ME), ME, 'no-such-account'));
+    await assertFails(blockMember(dbAs(ME), ME, 'm-sami'));
+    await assertFails(blockMember(dbAs(ME), ME, 'me'));
+  });
+
+  test('a block holds only the blocked uid and the server time', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+    const db = dbAs(ME);
+
+    for (const bad of [
+      { blockedUid: OTHER, blockedAt: serverTimestamp(), note: 'x' },
+      { blockedUid: OTHER },
+      { blockedAt: serverTimestamp() },
+      { blockedUid: THIRD, blockedAt: serverTimestamp() },
+      { blockedUid: 42, blockedAt: serverTimestamp() },
+      { blockedUid: OTHER, blockedAt: new Date(2020, 0, 1) },
+    ]) {
+      await assertFails(setDoc(blockedRef(db, ME, OTHER), bad), `${JSON.stringify(bad)} must be refused`);
+    }
+    // The same holds when overwriting an existing block.
+    await blockMember(db, ME, OTHER);
+    await assertFails(
+      setDoc(blockedRef(db, ME, OTHER), { blockedUid: OTHER, blockedAt: serverTimestamp(), note: 'x' }),
+    );
+  });
+
+  test('an overlong id is refused', async () => {
+    await seedAccounts(ME);
+    const long = 'x'.repeat(129);
+    await seed({ [`users/${long}`]: { ...profile('long_one'), id: long } });
+
+    await assertFails(blockMember(dbAs(ME), ME, long));
+  });
+});
+
+describe('blocking: account deletion cleanup', () => {
+  test('removes all of the member\'s 450 blocks, over several batches, and no one else\'s', async () => {
+    const docs = {};
+    for (let i = 0; i < 450; i++) {
+      docs[`users/${ME}/blocked/blocked-${i}`] = { blockedUid: `blocked-${i}`, blockedAt: new Date() };
+    }
+    docs[`users/${OTHER}/blocked/${ME}`] = { blockedUid: ME, blockedAt: new Date() };
+    docs[`users/${THIRD}/blocked/${OTHER}`] = { blockedUid: OTHER, blockedAt: new Date() };
+    await seed(docs);
+
+    const batches = await assertSucceeds(unblockAll(dbAs(ME), ME));
+
+    assert.equal(batches, 2, 'more than one batch was needed');
+    assert.deepEqual(await fetchBlockedIds(dbAs(ME), ME), []);
+    // Others' block lists, including blocks of the deleted member, remain.
+    assert.deepEqual(await fetchBlockedIds(dbAs(OTHER), OTHER), [ME]);
+    assert.deepEqual(await fetchBlockedIds(dbAs(THIRD), THIRD), [OTHER]);
+  });
+
+  test('running it again is harmless, and it cannot reach another list', async () => {
+    await seed({ [`users/${OTHER}/blocked/${THIRD}`]: { blockedUid: THIRD, blockedAt: new Date() } });
+
+    assert.equal(await assertSucceeds(unblockAll(dbAs(ME), ME)), 0);
+    await assertFails(unblockAll(dbAs(ME), OTHER));
+    assert.deepEqual(await fetchBlockedIds(dbAs(OTHER), OTHER), [THIRD]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reports: reports/{reportId}
+
+const reportsOf = (db) => collection(db, 'reports');
+
+/// Mirrors ReportDocument.reportIdFor: fixed for member and trade reports.
+function reportIdFor(uid, report) {
+  const target = report.kind === 'memberReport' ? report.memberId : report.tradeId;
+  return report.kind === 'complaint' ? null : `${uid}_${report.kind}_${target}`;
+}
+
+/// Mirrors ReportDocument.toData plus the server time.
+function reportData(uid, report) {
+  return { reporterId: uid, status: 'submitted', ...report, createdAt: serverTimestamp() };
+}
+
+/// Mirrors FirebaseReportRepository.createReport: looks for a duplicate
+/// among the reporter's own reports, then writes. Resolves to the id, or
+/// 'duplicate' when found.
+async function createReport(db, uid, report) {
+  const id = reportIdFor(uid, report);
+  let ref;
+  if (id === null) {
+    ref = doc(reportsOf(db));
+  } else {
+    const field = report.kind === 'memberReport' ? 'memberId' : 'tradeId';
+    const existing = await getDocs(
+      query(
+        reportsOf(db),
+        where('reporterId', '==', uid),
+        where('kind', '==', report.kind),
+        where(field, '==', report[field]),
+        limit(1),
+      ),
+    );
+    if (!existing.empty) return 'duplicate';
+    ref = doc(db, 'reports', id);
+  }
+  await setDoc(ref, reportData(uid, report));
+  return ref.id;
+}
+
+/// Mirrors FirebaseReportRepository.fetchMyReports.
+async function fetchMyReports(db, uid) {
+  const snapshot = await getDocs(query(reportsOf(db), where('reporterId', '==', uid), limit(200)));
+  return snapshot.docs.map((item) => item.id).sort();
+}
+
+const memberReport = (memberId, extra = {}) => ({ kind: 'memberReport', reason: 'Spam or scam', memberId, ...extra });
+const tradeReport = (tradeId, kind = 'tradeReport') => ({ kind, reason: 'Member did not attend', tradeId });
+const complaint = (extra = {}) => ({ kind: 'complaint', reason: 'A trade', ...extra });
+
+/// Writes [data] straight to reports/[id], skipping the app's own checks.
+const writeReport = (db, id, data) => setDoc(doc(db, 'reports', id), data);
+
+describe('reports: what the rules must allow', () => {
+  test('a member reports another member, then reads and lists it', async () => {
+    await seedAccounts(ME, OTHER);
+    const db = dbAs(ME);
+
+    const id = await assertSucceeds(createReport(db, ME, memberReport(OTHER, { details: 'Asked for money.' })));
+
+    assert.equal(id, `${ME}_memberReport_${OTHER}`);
+    await assertSucceeds(getDoc(doc(db, 'reports', id)));
+    assert.deepEqual(await assertSucceeds(fetchMyReports(db, ME)), [id]);
+    const stored = await read(`reports/${id}`);
+    assert.equal(stored.reporterId, ME);
+    assert.equal(stored.status, 'submitted');
+    assert.equal(stored.details, 'Asked for money.');
+    assert.ok(stored.createdAt);
+  });
+
+  test('trade reports, disputes and complaints can be sent', async () => {
+    await seedAccounts(ME);
+    const db = dbAs(ME);
+
+    assert.equal(await assertSucceeds(createReport(db, ME, tradeReport('t-sami'))), `${ME}_tradeReport_t-sami`);
+    assert.equal(
+      await assertSucceeds(createReport(db, ME, tradeReport('t-sami', 'tradeDispute'))),
+      `${ME}_tradeDispute_t-sami`,
+    );
+    const first = await assertSucceeds(createReport(db, ME, complaint()));
+    const second = await assertSucceeds(createReport(db, ME, complaint({ details: 'Again.' })));
+    assert.notEqual(first, second, 'complaints get their own ids');
+    assert.equal((await fetchMyReports(db, ME)).length, 4);
+  });
+
+  test('each member only finds their own reports', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+    await createReport(dbAs(ME), ME, memberReport(THIRD));
+    await createReport(dbAs(OTHER), OTHER, memberReport(THIRD));
+
+    assert.deepEqual(await fetchMyReports(dbAs(ME), ME), [`${ME}_memberReport_${THIRD}`]);
+    assert.deepEqual(await fetchMyReports(dbAs(OTHER), OTHER), [`${OTHER}_memberReport_${THIRD}`]);
+  });
+
+  test('reports stay after the reporter and the reported member are gone', async () => {
+    await seedAccounts(ME, OTHER);
+    const id = await createReport(dbAs(ME), ME, memberReport(OTHER));
+    await env.withSecurityRulesDisabled(async (context) => {
+      await deleteDoc(doc(context.firestore(), 'users', ME));
+      await deleteDoc(doc(context.firestore(), 'users', OTHER));
+    });
+
+    assert.ok(await read(`reports/${id}`));
+  });
+});
+
+describe('reports: what the rules must refuse', () => {
+  test('an unfiltered list of reports', async () => {
+    await seedAccounts(ME, OTHER);
+    await createReport(dbAs(ME), ME, memberReport(OTHER));
+
+    await assertFails(getDocs(reportsOf(dbAs(ME))));
+    await assertFails(getDocs(query(reportsOf(dbAs(ME)), limit(5))));
+  });
+
+  test('looking a report up by id cannot tell whether it exists', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+    await createReport(dbAs(OTHER), OTHER, memberReport(THIRD));
+
+    // Someone else's report, and one that does not exist, are both refused,
+    // so nobody can find out who reported whom by guessing ids.
+    await assertFails(getDoc(doc(dbAs(ME), 'reports', `${OTHER}_memberReport_${THIRD}`)));
+    await assertFails(getDoc(doc(dbAs(ME), 'reports', `${OTHER}_memberReport_${ME}`)));
+    await assertFails(
+      getDocs(query(reportsOf(dbAs(ME)), where(documentId(), '==', `${OTHER}_memberReport_${THIRD}`))),
+    );
+  });
+
+  test("another member cannot read, list, change or delete someone's reports", async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+    const id = await createReport(dbAs(ME), ME, memberReport(THIRD));
+    const db = dbAs(OTHER);
+
+    await assertFails(getDoc(doc(db, 'reports', id)));
+    await assertFails(getDocs(query(reportsOf(db), where('reporterId', '==', ME))));
+    await assertFails(updateDoc(doc(db, 'reports', id), { status: 'resolved' }));
+    await assertFails(deleteDoc(doc(db, 'reports', id)));
+    // The reported member cannot see it either.
+    await assertFails(getDoc(doc(dbAs(THIRD), 'reports', id)));
+  });
+
+  test('signed-out visitors can do nothing with reports', async () => {
+    await seedAccounts(ME, OTHER);
+    const id = await createReport(dbAs(ME), ME, memberReport(OTHER));
+    const db = anonymousDb();
+
+    await assertFails(getDoc(doc(db, 'reports', id)));
+    await assertFails(getDocs(query(reportsOf(db), where('reporterId', '==', ME))));
+    await assertFails(writeReport(db, 'anything', reportData(ME, complaint())));
+  });
+
+  test('the reporter can neither change nor delete their own report', async () => {
+    await seedAccounts(ME, OTHER);
+    const db = dbAs(ME);
+    const id = await createReport(db, ME, memberReport(OTHER));
+
+    await assertFails(updateDoc(doc(db, 'reports', id), { status: 'resolved' }));
+    await assertFails(updateDoc(doc(db, 'reports', id), { details: 'Changed my mind.' }));
+    await assertFails(deleteDoc(doc(db, 'reports', id)));
+  });
+
+  test('a second report of the same target is refused', async () => {
+    await seedAccounts(ME, OTHER);
+    const db = dbAs(ME);
+    await createReport(db, ME, memberReport(OTHER));
+    await createReport(db, ME, tradeReport('t-sami'));
+
+    // The app finds it first; a direct write over it is refused too.
+    assert.equal(await createReport(db, ME, memberReport(OTHER)), 'duplicate');
+    await assertFails(
+      writeReport(db, `${ME}_memberReport_${OTHER}`, reportData(ME, memberReport(OTHER, { reason: 'Harassment' }))),
+    );
+    await assertFails(writeReport(db, `${ME}_tradeReport_t-sami`, reportData(ME, tradeReport('t-sami'))));
+  });
+
+  test('a report must be sent as oneself', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+
+    await assertFails(
+      writeReport(dbAs(ME), `${OTHER}_memberReport_${THIRD}`, reportData(OTHER, memberReport(THIRD))),
+    );
+    await assertFails(writeReport(dbAs(ME), 'forged-complaint', reportData(OTHER, complaint())));
+  });
+
+  test('nobody can report themselves', async () => {
+    await seedAccounts(ME);
+
+    await assertFails(writeReport(dbAs(ME), `${ME}_memberReport_${ME}`, reportData(ME, memberReport(ME))));
+  });
+
+  test('only real accounts can be reported, never demo or made-up ids', async () => {
+    await seedAccounts(ME);
+    const db = dbAs(ME);
+
+    for (const member of ['no-such-account', 'm-sami', 'me']) {
+      await assertFails(
+        writeReport(db, `${ME}_memberReport_${member}`, reportData(ME, memberReport(member))),
+        `${member} must be refused`,
+      );
+    }
+  });
+
+  test('member and trade reports must use their fixed id', async () => {
+    await seedAccounts(ME, OTHER);
+    const db = dbAs(ME);
+
+    await assertFails(writeReport(db, 'any-id', reportData(ME, memberReport(OTHER))));
+    await assertFails(writeReport(db, `${ME}_memberReport_${THIRD}`, reportData(ME, memberReport(OTHER))));
+    await assertFails(writeReport(db, `${ME}_tradeReport_t-other`, reportData(ME, tradeReport('t-sami'))));
+    await assertFails(
+      writeReport(db, `${ME}_tradeReport_t-sami`, reportData(ME, tradeReport('t-sami', 'tradeDispute'))),
+    );
+  });
+
+  test('unknown kinds and mismatched targets are refused', async () => {
+    await seedAccounts(ME, OTHER);
+    const db = dbAs(ME);
+
+    await assertFails(writeReport(db, 'odd', reportData(ME, { kind: 'praise', reason: 'Lovely' })));
+    await assertFails(
+      writeReport(db, `${ME}_memberReport_${OTHER}`, reportData(ME, memberReport(OTHER, { tradeId: 't-sami' }))),
+    );
+    await assertFails(writeReport(db, 'complaint-1', reportData(ME, complaint({ memberId: OTHER }))));
+    await assertFails(writeReport(db, 'complaint-2', reportData(ME, complaint({ tradeId: 't-sami' }))));
+    await assertFails(writeReport(db, `${ME}_tradeReport_bad id`, reportData(ME, tradeReport('bad id'))));
+  });
+
+  test('only the report fields, with valid values, are accepted', async () => {
+    await seedAccounts(ME, OTHER);
+    const db = dbAs(ME);
+    const id = `${ME}_memberReport_${OTHER}`;
+
+    for (const bad of [
+      { priority: 'high' },
+      { details: 42 },
+      { details: 'x'.repeat(501) },
+      { reason: '' },
+      { reason: 'x'.repeat(61) },
+      { reason: 7 },
+      { status: 'resolved' },
+      { createdAt: new Date(2020, 0, 1) },
+      { listingId: 'bad listing id' },
+    ]) {
+      await assertFails(
+        writeReport(db, id, { ...reportData(ME, memberReport(OTHER)), ...bad }),
+        `${JSON.stringify(bad)} must be refused`,
+      );
+    }
+    const { createdAt, ...withoutTime } = reportData(ME, memberReport(OTHER));
+    assert.ok(createdAt);
+    await assertFails(writeReport(db, id, withoutTime));
+    // The longest details and a listing id are fine.
+    await assertSucceeds(
+      writeReport(db, id, reportData(ME, memberReport(OTHER, { details: 'x'.repeat(500), listingId: 'sami-1' }))),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Public profile switch on public profiles
+
+describe('public profiles: the Public profile switch', () => {
+  test('a hidden profile is published with the switch off', async () => {
+    await assertSucceeds(saveProfile(dbAs(ME), ME, fullProfile('maha_z'), { showProfile: false }));
+
+    assert.equal((await read(`publicProfiles/${ME}`)).profileVisible, false);
+  });
+
+  test('the switch is required, and a hidden profile cannot show more', async () => {
+    const db = dbAs(ME);
+    await saveProfile(db, ME, fullProfile('maha_z'));
+    const shown = publicData(ME, fullProfile('maha_z'));
+    const { profileVisible, ...withoutSwitch } = shown;
+    assert.equal(profileVisible, true);
+
+    await assertFails(writePublicOnly(db, ME, withoutSwitch));
+    await assertFails(writePublicOnly(db, ME, { ...shown, profileVisible: 'yes' }));
+    // Switched off, yet still showing the bio and skills.
+    await assertFails(writePublicOnly(db, ME, { ...shown, profileVisible: false }));
+    await assertSucceeds(
+      writePublicOnly(db, ME, publicData(ME, fullProfile('maha_z'), { showProfile: false })),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reviews: reviews/{reviewId}
+
+const reviewsOf = (db) => collection(db, 'reviews');
+
+/// What ReviewDocument.toData stores, plus the server time.
+function reviewData(uid, subjectId, extra = {}) {
+  return {
+    reviewerId: uid,
+    subjectId,
+    rating: 5,
+    tags: ['On time', 'Friendly'],
+    contextId: 't-sami',
+    contextKind: 'trade',
+    skillTitle: 'UI design',
+    ...extra,
+    createdAt: serverTimestamp(),
+  };
+}
+
+/// Mirrors FirebaseReviewRepository.createReview: looks for the reviewer's
+/// own earlier review of the same member, then writes it. Resolves to the
+/// id, or 'duplicate'.
+async function createReview(db, uid, subjectId, extra = {}) {
+  const existing = await getDocs(
+    query(reviewsOf(db), where('reviewerId', '==', uid), where('subjectId', '==', subjectId), limit(1)),
+  );
+  if (!existing.empty) return 'duplicate';
+  const id = `${uid}_${subjectId}`;
+  await setDoc(doc(db, 'reviews', id), reviewData(uid, subjectId, extra));
+  return id;
+}
+
+/// Mirrors FirebaseReviewRepository.fetchReviewsAbout.
+async function fetchReviewsAbout(db, subjectId) {
+  const snapshot = await getDocs(query(reviewsOf(db), where('subjectId', '==', subjectId), limit(200)));
+  return snapshot.docs.map((item) => item.id).sort();
+}
+
+/// Mirrors FirebaseReviewRepository.fetchReviewsBy.
+async function fetchReviewsBy(db, uid) {
+  const snapshot = await getDocs(query(reviewsOf(db), where('reviewerId', '==', uid), limit(200)));
+  return snapshot.docs.map((item) => item.id).sort();
+}
+
+/// Publishes [uid]'s profile, with the Public profile switch on or off.
+async function publishProfile(uid, username, { visible = true } = {}) {
+  await saveProfile(dbAs(uid), uid, fullProfile(username), { showProfile: visible });
+}
+
+describe('reviews: what the rules must allow', () => {
+  test('a member rates another member, once each way', async () => {
+    await publishProfile(ME, 'maha_z');
+    await publishProfile(OTHER, 'sami_a');
+
+    assert.equal(await assertSucceeds(createReview(dbAs(ME), ME, OTHER)), `${ME}_${OTHER}`);
+    assert.equal(await assertSucceeds(createReview(dbAs(OTHER), OTHER, ME)), `${OTHER}_${ME}`);
+
+    const stored = await read(`reviews/${ME}_${OTHER}`);
+    assert.deepEqual(Object.keys(stored).sort(), [
+      'contextId', 'contextKind', 'createdAt', 'rating', 'reviewerId', 'skillTitle', 'subjectId', 'tags',
+    ]);
+    assert.equal('phone' in stored, false);
+  });
+
+  test("anyone signed in can read a public member's reviews", async () => {
+    await publishProfile(ME, 'maha_z');
+    await publishProfile(OTHER, 'sami_a');
+    await seedAccounts(THIRD);
+    await createReview(dbAs(ME), ME, OTHER);
+
+    assert.deepEqual(await assertSucceeds(fetchReviewsAbout(dbAs(THIRD), OTHER)), [`${ME}_${OTHER}`]);
+    await assertSucceeds(getDoc(doc(dbAs(THIRD), 'reviews', `${ME}_${OTHER}`)));
+  });
+
+  test('a hidden member can still read their own reviews, and the reviewer theirs', async () => {
+    await publishProfile(ME, 'maha_z');
+    await publishProfile(OTHER, 'sami_a', { visible: false });
+    await createReview(dbAs(ME), ME, OTHER);
+
+    assert.deepEqual(await assertSucceeds(fetchReviewsAbout(dbAs(OTHER), OTHER)), [`${ME}_${OTHER}`]);
+    assert.deepEqual(await assertSucceeds(fetchReviewsBy(dbAs(ME), ME)), [`${ME}_${OTHER}`]);
+    await assertSucceeds(getDoc(doc(dbAs(ME), 'reviews', `${ME}_${OTHER}`)));
+  });
+
+  test('reviews stay after either account is deleted', async () => {
+    await publishProfile(ME, 'maha_z');
+    await publishProfile(OTHER, 'sami_a');
+    await createReview(dbAs(ME), ME, OTHER);
+    await createReview(dbAs(OTHER), OTHER, ME);
+
+    await deleteProfile(dbAs(ME), ME);
+
+    assert.ok(await read(`reviews/${ME}_${OTHER}`));
+    assert.ok(await read(`reviews/${OTHER}_${ME}`));
+  });
+});
+
+describe('reviews: what the rules must refuse', () => {
+  test("others cannot read a hidden member's reviews", async () => {
+    await publishProfile(ME, 'maha_z');
+    await publishProfile(OTHER, 'sami_a', { visible: false });
+    await seedAccounts(THIRD);
+    await createReview(dbAs(ME), ME, OTHER);
+    const db = dbAs(THIRD);
+
+    await assertFails(fetchReviewsAbout(db, OTHER));
+    await assertFails(getDoc(doc(db, 'reviews', `${ME}_${OTHER}`)));
+  });
+
+  test('reviews of a member without a public profile cannot be read by others', async () => {
+    await publishProfile(ME, 'maha_z');
+    await seedAccounts(OTHER, THIRD);
+    await createReview(dbAs(ME), ME, OTHER);
+
+    await assertFails(fetchReviewsAbout(dbAs(THIRD), OTHER));
+  });
+
+  test('switching the profile off hides reviews it showed before', async () => {
+    await publishProfile(ME, 'maha_z');
+    await publishProfile(OTHER, 'sami_a');
+    await seedAccounts(THIRD);
+    await createReview(dbAs(ME), ME, OTHER);
+    await assertSucceeds(fetchReviewsAbout(dbAs(THIRD), OTHER));
+
+    await publishProfile(OTHER, 'sami_a', { visible: false });
+
+    await assertFails(fetchReviewsAbout(dbAs(THIRD), OTHER));
+  });
+
+  test('unfiltered or unrelated lists of reviews', async () => {
+    await publishProfile(ME, 'maha_z');
+    await publishProfile(OTHER, 'sami_a', { visible: false });
+    await createReview(dbAs(ME), ME, OTHER);
+
+    await assertFails(getDocs(reviewsOf(dbAs(THIRD))));
+    await assertFails(getDocs(query(reviewsOf(dbAs(THIRD)), where('reviewerId', '==', ME))));
+  });
+
+  test('signed-out visitors can do nothing with reviews', async () => {
+    await publishProfile(ME, 'maha_z');
+    await publishProfile(OTHER, 'sami_a');
+    await createReview(dbAs(ME), ME, OTHER);
+    const db = anonymousDb();
+
+    await assertFails(fetchReviewsAbout(db, OTHER));
+    await assertFails(getDoc(doc(db, 'reviews', `${ME}_${OTHER}`)));
+    await assertFails(setDoc(doc(db, 'reviews', `${ME}_${OTHER}`), reviewData(ME, OTHER)));
+  });
+
+  test('a review must be written as oneself, never about oneself', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+
+    await assertFails(setDoc(doc(dbAs(ME), 'reviews', `${OTHER}_${THIRD}`), reviewData(OTHER, THIRD)));
+    // Under one's own id, but naming someone else as the reviewer.
+    await assertFails(setDoc(doc(dbAs(ME), 'reviews', `${ME}_${THIRD}`), reviewData(OTHER, THIRD)));
+    await assertFails(setDoc(doc(dbAs(ME), 'reviews', `${ME}_${ME}`), reviewData(ME, ME)));
+  });
+
+  test('only real accounts can be rated, never demo or made-up ids', async () => {
+    await seedAccounts(ME);
+    const db = dbAs(ME);
+
+    for (const subject of ['no-such-account', 'm-sami', 'me']) {
+      await assertFails(
+        setDoc(doc(db, 'reviews', `${ME}_${subject}`), reviewData(ME, subject)),
+        `${subject} must be refused`,
+      );
+    }
+  });
+
+  test('the id must be the reviewer and the rated member', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+    const db = dbAs(ME);
+
+    await assertFails(setDoc(doc(db, 'reviews', 'any-id'), reviewData(ME, OTHER)));
+    await assertFails(setDoc(doc(db, 'reviews', `${ME}_${THIRD}`), reviewData(ME, OTHER)));
+    await assertFails(setDoc(doc(db, 'reviews', `${OTHER}_${ME}`), reviewData(ME, OTHER)));
+  });
+
+  test('a second review of the same member is refused', async () => {
+    await seedAccounts(ME, OTHER);
+    const db = dbAs(ME);
+    await createReview(db, ME, OTHER);
+
+    assert.equal(await createReview(db, ME, OTHER, { rating: 1 }), 'duplicate');
+    await assertFails(setDoc(doc(db, 'reviews', `${ME}_${OTHER}`), reviewData(ME, OTHER, { rating: 1 })));
+    assert.equal((await read(`reviews/${ME}_${OTHER}`)).rating, 5);
+  });
+
+  test('ratings must be whole stars from 1 to 5', async () => {
+    await seedAccounts(ME, OTHER);
+    const db = dbAs(ME);
+
+    for (const rating of [0, 6, -1, 4.5, '5', null]) {
+      await assertFails(
+        setDoc(doc(db, 'reviews', `${ME}_${OTHER}`), reviewData(ME, OTHER, { rating })),
+        `${rating} must be refused`,
+      );
+    }
+    await assertSucceeds(setDoc(doc(db, 'reviews', `${ME}_${OTHER}`), reviewData(ME, OTHER, { rating: 1 })));
+  });
+
+  test('tags must be the offered ones, at most five, without repeats', async () => {
+    await seedAccounts(ME, OTHER);
+    const db = dbAs(ME);
+
+    for (const tags of [
+      ['Rude'],
+      ['On time', 'On time'],
+      'On time',
+      ['Great teacher', 'On time', 'Friendly', 'Well prepared', 'Would trade again', 'Extra'],
+      [7],
+    ]) {
+      await assertFails(
+        setDoc(doc(db, 'reviews', `${ME}_${OTHER}`), reviewData(ME, OTHER, { tags })),
+        `${JSON.stringify(tags)} must be refused`,
+      );
+    }
+    await assertSucceeds(
+      setDoc(
+        doc(db, 'reviews', `${ME}_${OTHER}`),
+        reviewData(ME, OTHER, { tags: ['Great teacher', 'On time', 'Friendly', 'Well prepared', 'Would trade again'] }),
+      ),
+    );
+  });
+
+  test('only the review fields, with valid values, are accepted', async () => {
+    await seedAccounts(ME, OTHER);
+    const db = dbAs(ME);
+    const ref = doc(db, 'reviews', `${ME}_${OTHER}`);
+
+    for (const bad of [
+      { comment: 'Lovely' },
+      { phone: '512345678' },
+      { contextKind: 'listing' },
+      { contextId: 'bad id' },
+      { skillTitle: 'x'.repeat(101) },
+      { createdAt: new Date(2020, 0, 1) },
+    ]) {
+      await assertFails(setDoc(ref, { ...reviewData(ME, OTHER), ...bad }), `${JSON.stringify(bad)} must be refused`);
+    }
+    const { contextId, ...withoutContext } = reviewData(ME, OTHER);
+    assert.ok(contextId);
+    await assertFails(setDoc(ref, withoutContext));
+  });
+
+  test('nobody can change or delete a review', async () => {
+    await seedAccounts(ME, OTHER);
+    await createReview(dbAs(ME), ME, OTHER);
+    const ref = (db) => doc(db, 'reviews', `${ME}_${OTHER}`);
+
+    for (const db of [dbAs(ME), dbAs(OTHER)]) {
+      await assertFails(updateDoc(ref(db), { rating: 1 }));
+      await assertFails(deleteDoc(ref(db)));
+    }
   });
 });

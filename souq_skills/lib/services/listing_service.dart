@@ -8,7 +8,10 @@ import 'package:souq_skills/models/user.dart';
 
 import 'auth_service.dart';
 import 'badge_service.dart';
+import 'member_service.dart';
 import 'repository.dart';
+import 'review_service.dart';
+import 'safety_service.dart';
 
 export 'package:souq_skills/data/listing_repository.dart' show ListingException;
 
@@ -114,33 +117,56 @@ class ListingService {
         uid == AuthService.repository.uid &&
         identical(repository, ListingService.repository);
     final saved = savedRepository;
+    final blocked = SafetyService.repository;
     try {
-      // The hearts are part of what is shown, so both load together or
-      // neither is applied.
-      final (fetched, savedIds) = await (
+      // The hearts and the blocks decide what is shown, so all three load
+      // together or none is applied: listings are never shown before the
+      // block list, which would show members who were blocked.
+      final (fetched, savedIds, blockedIds) = await (
         repository.fetchListings(uid: uid),
         saved == null || uid == null
             ? Future<Set<String>?>.value()
             : saved.fetchSavedIds(uid),
+        blocked == null || uid == null
+            ? Future<Set<String>?>.value()
+            : blocked.fetchBlockedIds(uid),
       ).wait;
       if (!isCurrent()) return;
+      if (blockedIds != null) SafetyService().replaceOnlineBlocks(blockedIds);
       _replaceListings(fetched, savedIds);
       _loadedFor = uid;
       loadState.value = const ListingLoadState(ListingLoadStatus.loaded);
       if (saved != null && uid != null && savedIds != null) {
         _forgetDeletedSaves(saved, uid, savedIds, fetched);
       }
-    } on ParallelWaitError<(List<SkillListing>?, Set<String>?), dynamic> catch (
-      error
-    ) {
+      // Owners' and blocked members' names are filled in afterwards:
+      // browsing never waits for them, and known members are not fetched
+      // again.
+      MemberService().loadMembers({
+        for (final item in fetched) item.ownerId,
+        ...?blockedIds,
+      }).ignore();
+      // Ratings on the cards and the member's own, likewise in the
+      // background, once per account; private ones stay hidden.
+      ReviewService().refreshReviews({
+        User.currentUserId,
+        for (final item in fetched) item.ownerId,
+      }).ignore();
+    } on ParallelWaitError<
+      (List<SkillListing>?, Set<String>?, Set<String>?),
+      dynamic
+    > catch (error) {
       if (!isCurrent()) return;
-      final (listingsError, savedError) = error.errors;
-      final problem = listingsError?.error ?? savedError?.error;
+      final (listingsError, savedError, blockedError) = error.errors;
+      final problem =
+          listingsError?.error ?? savedError?.error ?? blockedError?.error;
       loadState.value = ListingLoadState(
         ListingLoadStatus.failed,
-        problem is ListingException
-            ? problem.message
-            : 'We could not reach the listings. Try again.',
+        switch (problem) {
+          ListingException(:final message) => message,
+          BlockingException(:final message) => message,
+          _ => 'We could not reach the listings. Try again.',
+        },
       );
     } on ListingException catch (error) {
       if (!isCurrent()) return;
@@ -211,8 +237,14 @@ class ListingService {
 
   List<SkillListing> mine() => byOwner(User.currentUserId);
 
-  List<SkillListing> saved() =>
-      _repo.listings.where((item) => item.isSaved).toList();
+  /// Saved listings, leaving out blocked members' (they stay saved, and
+  /// come back if the member is unblocked).
+  List<SkillListing> saved() => _repo.listings
+      .where(
+        (item) =>
+            item.isSaved && !_repo.blockedMemberIds.contains(item.ownerId),
+      )
+      .toList();
 
   /// The location to show, hiding the current user's city if they chose to.
   String locationLabel(SkillListing listing) =>
@@ -273,10 +305,17 @@ class ListingService {
   Future<void> removeAccountData() async {
     final listings = repository;
     final saved = savedRepository;
-    if (listings == null && saved == null) return;
+    final blocked = SafetyService.repository;
+    if (listings == null && saved == null && blocked == null) return;
     final uid = _signedInUid();
     await listings?.deleteAllListingsOf(uid);
     await saved?.unsaveAll(uid);
+    // Only this account's own blocks; others' blocks are theirs.
+    try {
+      await SafetyService().removeAccountData();
+    } on BlockingException catch (error) {
+      throw ListingException(error.message);
+    }
     final others = [
       for (final item in _repo.listings)
         if (!isMine(item)) item.copyWith(isSaved: false),

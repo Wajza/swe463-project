@@ -6,11 +6,13 @@ class ListingsLoadError extends StatelessWidget {
   const ListingsLoadError({
     required this.message,
     required this.onRetry,
+    this.title = 'Could not load skills',
     super.key,
   });
 
   final String message;
   final VoidCallback onRetry;
+  final String title;
 
   @override
   Widget build(BuildContext context) => Card(
@@ -30,7 +32,7 @@ class ListingsLoadError extends StatelessWidget {
               spacing: 2,
               children: [
                 Text(
-                  'Could not load skills',
+                  title,
                   style: context.textStyles.titleSmall?.copyWith(
                     fontWeight: FontWeight.bold,
                     color: context.colors.onErrorContainer,

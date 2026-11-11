@@ -42,6 +42,20 @@ abstract class AuthRepository {
 
   Future<void> signOut();
 
+  /// Whether the member must verify their phone number again, with
+  /// [sendReauthenticationCode] and [reauthenticate], before their account
+  /// can be deleted. Firebase only deletes an account signed in recently.
+  bool get requiresReauthentication;
+
+  /// Sends a code by SMS to the signed-in account's own number, to confirm
+  /// it is still them. [phoneNumber] is used if the account has none.
+  Future<void> sendReauthenticationCode(String phoneNumber);
+
+  /// Confirms the signed-in member with the code sent by
+  /// [sendReauthenticationCode]. They stay signed in either way. Throws an
+  /// [AuthException] if the code is wrong or for another number.
+  Future<void> reauthenticate(String smsCode);
+
   /// Removes the sign-in account. Its profile is removed separately, by the
   /// ProfileRepository, before this is called.
   Future<void> deleteAccount();
@@ -90,6 +104,11 @@ class FirebaseAuthRepository implements AuthRepository {
       );
       return;
     }
+    return _sendSms(phoneNumber);
+  }
+
+  /// Texts a code to [phoneNumber] on Android and iOS.
+  Future<void> _sendSms(String phoneNumber) async {
     final sent = Completer<void>();
     void finish([Object? error]) {
       if (sent.isCompleted) return;
@@ -158,6 +177,34 @@ class FirebaseAuthRepository implements AuthRepository {
   });
 
   @override
+  bool get requiresReauthentication => true;
+
+  @override
+  Future<void> sendReauthenticationCode(String phoneNumber) async {
+    _clearPending();
+    final user = _auth.currentUser;
+    if (user == null) throw const AuthException(_sessionExpired);
+    final number = user.phoneNumber ?? phoneNumber;
+    if (kIsWeb) {
+      // Only texts the code: the ConfirmationResult is never confirmed,
+      // which would sign in, but gives the verification id for
+      // [reauthenticate], as for [verifyNewPhone].
+      _confirmation = await _guard(() => _auth.signInWithPhoneNumber(number));
+      return;
+    }
+    return _sendSms(number);
+  }
+
+  /// The same account stays signed in, whether or not the code is right.
+  @override
+  Future<void> reauthenticate(String smsCode) => _guard(() async {
+    final user = _auth.currentUser;
+    if (user == null) throw const AuthException(_sessionExpired);
+    await user.reauthenticateWithCredential(_credentialFor(smsCode));
+    _clearPending();
+  });
+
+  @override
   Future<bool> hasProfile() => _guard(() async {
     final uid = this.uid;
     if (uid == null) throw const AuthException(_sessionExpired);
@@ -212,7 +259,8 @@ class FirebaseAuthRepository implements AuthRepository {
         'account-exists-with-different-credential' =>
           'That number already belongs to another account.',
         'requires-recent-login' =>
-          'For your security, sign out and sign in again first.',
+          'For your security, verify your phone number again first.',
+        'user-mismatch' => 'That code was sent to a different number.',
         'user-disabled' => 'This account has been disabled.',
         _ => 'We could not verify your phone number. Try again.',
       });
@@ -228,10 +276,18 @@ class FirebaseAuthRepository implements AuthRepository {
 /// Works without a backend: any 6-digit code is accepted. Used when
 /// Firebase has not been set up, such as in widget tests.
 class DemoAuthRepository implements AuthRepository {
-  DemoAuthRepository({required this.isKnownPhone});
+  DemoAuthRepository({
+    required this.isKnownPhone,
+    this.requiresReauthentication = false,
+  });
 
   /// Whether [phone] (local format) already has a profile on this device.
   final bool Function(String phone) isKnownPhone;
+
+  /// Off for the offline demo, which has no online account to protect; on
+  /// to test deleting as with Firebase.
+  @override
+  final bool requiresReauthentication;
 
   static const demoCode = '123456';
   String? _phone;
@@ -260,6 +316,17 @@ class DemoAuthRepository implements AuthRepository {
 
   @override
   Future<void> signOut() async => _phone = null;
+
+  @override
+  Future<void> sendReauthenticationCode(String phoneNumber) async {}
+
+  /// Accepts only [demoCode], so a wrong code can be tried.
+  @override
+  Future<void> reauthenticate(String smsCode) async {
+    if (smsCode != demoCode) {
+      throw const AuthException('That code is not correct.');
+    }
+  }
 
   @override
   Future<void> deleteAccount() async => _phone = null;

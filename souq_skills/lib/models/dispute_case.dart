@@ -31,6 +31,7 @@ class DisputeCase implements Identifiable {
     this.tradeId,
     this.memberId,
     this.status = DisputeStatus.submitted,
+    this.details = '',
   });
 
   @override
@@ -43,6 +44,9 @@ class DisputeCase implements Identifiable {
   final String? memberId;
   final DisputeStatus status;
 
+  /// What the member added in their own words; empty if nothing.
+  final String details;
+
   Map<String, dynamic> toJson() => {
     'id': id,
     'caseNumber': caseNumber,
@@ -52,6 +56,7 @@ class DisputeCase implements Identifiable {
     'tradeId': tradeId,
     'memberId': memberId,
     'status': status.name,
+    'details': details,
   };
 
   factory DisputeCase.fromJson(Map<String, dynamic> json) => DisputeCase(
@@ -63,5 +68,7 @@ class DisputeCase implements Identifiable {
     tradeId: json['tradeId'] as String?,
     memberId: json['memberId'] as String?,
     status: DisputeStatus.values.byName(json['status'] as String),
+    // Saved before details existed: none.
+    details: json['details'] as String? ?? '',
   );
 }

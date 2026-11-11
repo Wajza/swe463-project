@@ -32,7 +32,15 @@ class _FailingProfiles implements ProfileRepository {
       throw const ProfileException('Check your internet connection.');
 
   @override
-  Future<void> saveProfile(String uid, User profile) async {}
+  Future<void> saveProfile(
+    String uid,
+    User profile, {
+    ProfileVisibility visibility = const ProfileVisibility(),
+  }) async {}
+
+  @override
+  Future<Map<String, User>> fetchPublicProfiles(Iterable<String> uids) async =>
+      const {};
 
   @override
   Future<void> deleteProfile(String uid) async {}
@@ -81,9 +89,7 @@ void main() {
   });
 
   group('after sign-in', () {
-    testWidgets('an existing profile is loaded and opens Home', (
-      tester,
-    ) async {
+    testWidgets('an existing profile is loaded and opens Home', (tester) async {
       AuthService.profiles = DemoProfileRepository(profiles: {_uid: _maha});
 
       await _verify(tester, '512345678');

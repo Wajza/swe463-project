@@ -1,14 +1,19 @@
 import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
+import 'package:souq_skills/core/app_routes.dart';
 import 'package:souq_skills/data/group_trade_repository.dart';
 import 'package:souq_skills/data/wallet_repository.dart';
 import 'package:souq_skills/models/group_trade.dart';
+import 'package:souq_skills/models/notification.dart';
 import 'package:souq_skills/models/user.dart';
 
 import 'auth_service.dart';
+import 'chat_service.dart';
 import 'member_service.dart';
+import 'notification_service.dart';
 import 'repository.dart';
+import 'safety_service.dart';
 
 export 'package:souq_skills/data/group_trade_repository.dart'
     show GroupTradeException;
@@ -141,6 +146,8 @@ class OnlineGroups {
 
   static void _onGroups(String uid, List<GroupTrade> items) {
     if (!_isCurrent(uid)) return;
+    final previous = Map.of(_groups);
+    final wasLoaded = _loaded;
     _groups
       ..clear()
       ..addEntries(items.map((item) => MapEntry(item.id, item)));
@@ -156,8 +163,99 @@ class OnlineGroups {
       if (group.isCompleted && group.memberIds.contains(User.currentUserId)) {
         unawaited(_claimReward(uid, group.id));
       }
+      // Only what changes while listening; older groups are just shown.
+      if (wasLoaded) _notifyChange(uid, previous[group.id], group);
     }
     Repository.instance.emitChange();
+  }
+
+  /// Notifies an invitation to the current member, or the group completing,
+  /// when another member made that change.
+  static void _notifyChange(String uid, GroupTrade? before, GroupTrade after) {
+    const me = User.currentUserId;
+    final by = after.lastChangedBy;
+    if (by.isEmpty || by == me) return;
+    if (after.invitedIds.contains(me) &&
+        !(before?.invitedIds.contains(me) ?? false)) {
+      _notify(
+        uid,
+        after.ownerId,
+        title: 'Group trade invitation',
+        message: (name) => '$name invited you to ${after.title}.',
+        route: AppRoutes.groupTradeDetails,
+        groupId: after.id,
+      );
+    } else if (after.isCompleted &&
+        before != null &&
+        !before.isCompleted &&
+        after.memberIds.contains(me)) {
+      _notify(
+        uid,
+        by,
+        title: 'Group trade completed',
+        message: (_) =>
+            'Every member confirmed ${after.title}. Each member gets '
+            '${WalletDocument.groupReward} credits.',
+        route: AppRoutes.groupTradeDetails,
+        groupId: after.id,
+      );
+    }
+  }
+
+  /// Notifies the newest message another member sent to [groupId] while
+  /// listening, unless its chat is open.
+  static void _notifyMessages(
+    String uid,
+    String groupId,
+    List<GroupMessage> before,
+    List<GroupMessage> after,
+  ) {
+    final known = {for (final message in before) message.id};
+    final fresh = [
+      for (final message in after)
+        if (!known.contains(message.id) &&
+            message.senderId != User.currentUserId)
+          message,
+    ];
+    if (fresh.isEmpty ||
+        ChatService.isOpen(ChatService.groupConversationId(groupId))) {
+      return;
+    }
+    final latest = fresh.last;
+    final title = _groups[groupId]?.title ?? 'your group';
+    _notify(
+      uid,
+      latest.senderId,
+      title: 'New message in $title',
+      message: (name) => '$name: ${latest.text}',
+      type: NotificationType.message,
+      route: AppRoutes.groupChat,
+      groupId: groupId,
+    );
+  }
+
+  /// Notifies once [memberId]'s name is known; never from a member the
+  /// current user blocked, nor once another account has signed in.
+  static void _notify(
+    String uid,
+    String memberId, {
+    required String title,
+    required String Function(String name) message,
+    required String route,
+    required String groupId,
+    NotificationType type = NotificationType.groupTrade,
+  }) {
+    if (SafetyService().isBlocked(memberId)) return;
+    MemberService().loadMembers([memberId]).then((_) {
+      if (!_isCurrent(uid) || SafetyService().isBlocked(memberId)) return;
+      NotificationService().push(
+        title: title,
+        message: message(MemberService().nameOf(memberId)),
+        type: type,
+        route: route,
+        routeArgument: groupId,
+      );
+    });
   }
 
   /// Listens to the chat of each group the member belongs to, and stops
@@ -182,7 +280,10 @@ class OnlineGroups {
       _messageWatches[id] = online.watchMessages(uid, id).listen(
         (items) {
           if (!_isCurrent(uid)) return;
+          final before = _messages[id];
           _messages[id] = items;
+          // The first messages to arrive are older ones, never notified.
+          if (before != null) _notifyMessages(uid, id, before, items);
           Repository.instance.emitChange();
         },
         // A chat that cannot load stays as it was; the group still shows.

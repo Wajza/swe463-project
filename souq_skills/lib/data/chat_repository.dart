@@ -112,6 +112,12 @@ abstract class ChatRepository {
   /// Records that [uid] has read everything with [memberId] so far. Does
   /// nothing if they never wrote to each other. Throws a [ChatException].
   Future<void> markConversationRead(String uid, String memberId);
+
+  /// Whether message [messageId] with [memberId] is a trade step's note or
+  /// proposal card rather than something a member typed. Those steps are
+  /// notified by the trade itself, so the chat does not notify them again.
+  /// Throws a [ChatException].
+  Future<bool> isTradeUpdate(String uid, String memberId, String messageId);
 }
 
 /// Converts between the app's chat models and what is stored online.
@@ -337,6 +343,18 @@ class FirebaseChatRepository implements ChatRepository {
           .transform(_errors('We could not load these messages.'));
 
   @override
+  Future<bool> isTradeUpdate(String uid, String memberId, String messageId) =>
+      _guard(() async {
+        if (!ChatDocument.isSafeId(messageId)) return false;
+        final snapshot = await _conversation(
+          uid,
+          memberId,
+        ).collection('messages').doc(messageId).get();
+        final kind = snapshot.data()?['kind'];
+        return kind is String && kind != ChatMessageKind.text.name;
+      });
+
+  @override
   Future<void> markConversationRead(String uid, String memberId) =>
       _guard(() async {
         try {
@@ -432,6 +450,17 @@ class DemoChatRepository implements ChatRepository {
     return _lastTime = now.isAfter(_lastTime)
         ? now
         : _lastTime.add(const Duration(milliseconds: 1));
+  }
+
+  @override
+  Future<bool> isTradeUpdate(
+    String uid,
+    String memberId,
+    String messageId,
+  ) async {
+    final id = ChatDocument.conversationIdFor(uid, memberId);
+    final kind = _messages[id]?[messageId]?['kind'];
+    return kind is String && kind != ChatMessageKind.text.name;
   }
 
   @override

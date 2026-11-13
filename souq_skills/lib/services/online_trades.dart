@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:souq_skills/core/app_routes.dart';
+import 'package:souq_skills/core/formatters.dart';
 import 'package:souq_skills/data/trade_repository.dart';
 import 'package:souq_skills/models/notification.dart';
 import 'package:souq_skills/models/trade.dart';
@@ -175,44 +176,103 @@ class OnlineTrades {
     // Credits for completed trades are paid online, into both wallets.
     if (items.any((item) => item.trade.isComplete)) BadgeService().sync();
     for (final item in items) {
-      final before = previous[item.trade.id]?.trade;
+      final before = previous[item.trade.id];
       final trade = item.trade;
       // Only what changes while listening; older trades are just shown.
-      if (!wasLoaded || before == null) continue;
-      if (trade.isComplete && !before.isComplete) {
+      if (!wasLoaded) continue;
+      if (before == null) {
+        if (item.lastChangedByOther && trade.status == TradeStatus.pending) {
+          _notify(
+            uid,
+            trade,
+            'New trade proposal',
+            (name) => '$name sent you a proposal.',
+          );
+        }
+        continue;
+      }
+      if (trade.isComplete && !before.trade.isComplete) {
         TradeService().askForRating(trade);
       } else if (item.lastChangedByOther) {
-        _notifyChange(before, trade);
+        _notifyChange(uid, before, item);
       }
     }
     Repository.instance.emitChange();
   }
 
-  static void _notifyChange(Trade before, Trade after) {
-    final memberId = after.otherMemberId;
+  /// Notifies a change the other member made to a trade, seen while
+  /// listening.
+  static void _notifyChange(String uid, OnlineTrade before, OnlineTrade after) {
+    final was = before.trade;
+    final now = after.trade;
+    final session = after.session;
+    final String title;
+    final String Function(String name) message;
+    switch ((was.status, now.status)) {
+      case (TradeStatus.pending, TradeStatus.accepted):
+        title = 'Proposal accepted';
+        message = (name) => '$name accepted your proposal.';
+      case (TradeStatus.pending, TradeStatus.pending)
+          when now.proposalId != was.proposalId:
+        title = 'New counteroffer';
+        message = (name) => '$name sent you a counteroffer.';
+      case (TradeStatus.pending, TradeStatus.declined):
+        title = 'Proposal declined';
+        message = (name) => '$name declined your proposal.';
+      case (TradeStatus.pending, TradeStatus.cancelled):
+        title = 'Proposal cancelled';
+        message = (name) => '$name cancelled their proposal.';
+      case (TradeStatus.accepted, TradeStatus.accepted)
+          when now.confirmedByOther && !was.confirmedByOther:
+        title =
+            '${MemberService().nameOf(now.otherMemberId)} marked the trade '
+            'as complete';
+        message = (_) => 'Confirm it too to complete the trade.';
+      case (TradeStatus.accepted, TradeStatus.accepted)
+          when session != null && before.session == null:
+        final at = AppFormatters.dateTime(session.scheduledAt);
+        title = 'Session booked';
+        message = (name) => '$name booked a session for $at.';
+      case (TradeStatus.accepted, TradeStatus.accepted)
+          when session != null &&
+              before.session != null &&
+              !_sameSession(before.session!, session):
+        final at = AppFormatters.dateTime(session.scheduledAt);
+        title = 'Session rescheduled';
+        message = (name) => '$name changed the session to $at.';
+      default:
+        return;
+    }
+    _notify(uid, now, title, message);
+  }
+
+  static bool _sameSession(TradeSession a, TradeSession b) =>
+      a.scheduledAt == b.scheduledAt &&
+      a.method == b.method &&
+      a.locationOrLink == b.locationOrLink &&
+      a.notes == b.notes;
+
+  /// Notifies [trade]'s step, once the other member's name is known; never
+  /// from a member the current user blocked, nor once another account has
+  /// signed in.
+  static void _notify(
+    String uid,
+    Trade trade,
+    String title,
+    String Function(String name) message,
+  ) {
+    final memberId = trade.otherMemberId;
     if (SafetyService().isBlocked(memberId)) return;
-    final name = MemberService().nameOf(memberId);
-    final (title, message) = switch ((before.status, after.status)) {
-      (TradeStatus.pending, TradeStatus.accepted) => (
-        'Proposal accepted',
-        '$name accepted your proposal.',
-      ),
-      (TradeStatus.accepted, TradeStatus.accepted)
-          when after.confirmedByOther && !before.confirmedByOther =>
-        (
-          '$name marked the trade as complete',
-          'Confirm it too to complete the trade.',
-        ),
-      _ => (null, null),
-    };
-    if (title == null || message == null) return;
-    NotificationService().push(
-      title: title,
-      message: message,
-      type: NotificationType.trade,
-      route: AppRoutes.tradeDetails,
-      routeArgument: after.id,
-    );
+    MemberService().loadMembers([memberId]).then((_) {
+      if (!_isCurrent(uid) || SafetyService().isBlocked(memberId)) return;
+      NotificationService().push(
+        title: title,
+        message: message(MemberService().nameOf(memberId)),
+        type: NotificationType.trade,
+        route: AppRoutes.tradeDetails,
+        routeArgument: trade.id,
+      );
+    });
   }
 
   static void _onProposals(String uid, List<TradeProposal> items) {

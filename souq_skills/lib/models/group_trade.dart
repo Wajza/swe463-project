@@ -23,6 +23,7 @@ class GroupTrade implements Identifiable {
     this.description = '',
     this.sessionsMinutes = 60,
     this.confirmedIds = const [],
+    this.lastChangedBy = '',
   });
 
   @override
@@ -40,6 +41,11 @@ class GroupTrade implements Identifiable {
   /// once every member has.
   final List<String> confirmedIds;
 
+  /// Who made the latest change to an online group (`'me'` for the current
+  /// member), so they are not notified of their own changes. Not saved on
+  /// this device.
+  final String lastChangedBy;
+
   bool get isCompleted => status == GroupTradeStatus.completed;
 
   GroupTrade copyWith({
@@ -53,6 +59,7 @@ class GroupTrade implements Identifiable {
     String? description,
     int? sessionsMinutes,
     List<String>? confirmedIds,
+    String? lastChangedBy,
   }) => GroupTrade(
     id: id ?? this.id,
     title: title ?? this.title,
@@ -64,6 +71,7 @@ class GroupTrade implements Identifiable {
     description: description ?? this.description,
     sessionsMinutes: sessionsMinutes ?? this.sessionsMinutes,
     confirmedIds: confirmedIds ?? this.confirmedIds,
+    lastChangedBy: lastChangedBy ?? this.lastChangedBy,
   );
 
   Map<String, dynamic> toJson() => {

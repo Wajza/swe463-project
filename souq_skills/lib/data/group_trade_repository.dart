@@ -357,6 +357,7 @@ abstract final class GroupTradeDocument {
     }
     final description = data['description'];
     final minutes = data['sessionsMinutes'];
+    final updatedBy = data['updatedBy'];
     return GroupTrade(
       id: id,
       title: title,
@@ -375,6 +376,7 @@ abstract final class GroupTradeDocument {
         for (final item in _confirmations(data['completedBy']).keys)
           _localId(item, viewerUid),
       ],
+      lastChangedBy: updatedBy is String ? _localId(updatedBy, viewerUid) : '',
     );
   }
 

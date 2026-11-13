@@ -77,6 +77,11 @@ class ChatService {
   /// How many screens show each conversation right now.
   static final Map<String, int> _openCounts = {};
 
+  /// Whether a screen shows [conversationId] right now; its new messages
+  /// are not notified.
+  static bool isOpen(String conversationId) =>
+      _openCounts.containsKey(conversationId);
+
   /// Starts listening to the signed-in account's chats, or stops when
   /// nobody is signed in, offline, or the account changed. Called whenever
   /// signing in or out may have changed; does nothing if it did not.
@@ -489,15 +494,31 @@ class ChatService {
   static void _notifyOnlineMessage(String uid, ChatConversation item) {
     final memberId = item.memberId;
     if (SafetyService().isBlocked(memberId)) return;
-    // Waits for the sender's name, which may not be known yet.
-    MemberService().loadMembers([memberId]).then((_) {
-      if (!_isCurrent(uid)) return;
+    // Waits for the sender's name, which may not be known yet. A trade
+    // step's note or card is notified by the trade itself (OnlineTrades),
+    // so it is not notified again as a message.
+    final names = MemberService().loadMembers([memberId]);
+    _isTradeUpdate(uid, item).then((isTradeUpdate) async {
+      await names;
+      if (!_isCurrent(uid) || isTradeUpdate) return;
       _notifyMessage(
         memberId,
         MemberService().nameOf(memberId),
         item.lastMessage,
       );
     });
+  }
+
+  /// Whether [item]'s latest message is a trade step. If that cannot be
+  /// told, it is notified as a message rather than missed.
+  static Future<bool> _isTradeUpdate(String uid, ChatConversation item) async {
+    final online = repository;
+    if (online == null) return false;
+    try {
+      return await online.isTradeUpdate(uid, item.memberId, item.lastMessageId);
+    } on ChatException {
+      return false;
+    }
   }
 
   static void _notifyMessage(

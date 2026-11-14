@@ -351,17 +351,16 @@ Drawn from the repository's commit history.
 | 11–13 Nov 2026 | Real-time chat, trades and proposals, wallet and credits, online group trades and in-app notifications in Firebase |
 | 14 Nov 2026 | Frontend features from `phase3/frontend` integrated (pull request #3); the `phase-3` tag points to this commit |
 
-## Individual contributions
+## Contribution record
 
-From `git shortlog` on 14 Nov 2026, across all branches, with each member's Git identities combined. Commits do not capture design, testing, meetings or report writing.
+Based on the November 2026 commits and pull requests. Merge commits are cited as evidence only. Commits do not capture design, testing, meetings or report writing.
 
-| Git author | Commits | Work visible in Git |
-|---|---:|---|
-| Raghad Almaghrabi | 23 | Profile, badges, listing details and reviews page, skill posting, wallet layout and credit guide, Safety Centre, notification preferences, widget refactoring; co-author of the frontend integration |
-| Yasmeen Alshehri | 12 | Essential-features documentation; Firebase configuration, phone authentication and profiles, profile and skills sync, unique usernames and Firestore rules, listings in Firestore, public profiles, blocking, reports and ratings |
-| Wajd Alghamdi | 7 | README, web platform files, screens and services on `main`, front-end rebuild, selection-first redesign and on-device persistence |
-| `xfas51` | 7 | Project structure and basic app; Firebase real-time chat, trades, wallet and credits, online group trades, in-app notifications, frontend integration |
-| Fatimah Alshehab | 2 | Initial commit; merged pull request #3 |
+| Member | Assigned task | Completed work | Evidence |
+|---|---|---|---|
+| Yasmeen Alshehri (202271660) | Backend Development | Firebase project setup, with the local Firebase config excluded from Git; phone authentication and profiles; profile and skills sync with Firestore; unique usernames and Firestore security rules; listings in Firestore; public profiles, blocking, reports and ratings; Phase 3 README update | Commits `3d323a2`, `4f906ab`, `205d890`, `8fa97f1`, `4f4090e`, `775a745`, `ed5d376`, `7d9b96e`, `6bd3b9e`, `4e4d76c`; PR #2 |
+| Fatimah Alshehab (202278660) | Backend Development | Firebase real-time chat; trades and proposals in Firebase; wallet and credits; online group trades; in-app notifications; integration of the frontend branch's features into `main` | Commits `80db108`, `b4783f7`, `f53b9dd`, `82450d8`, `85bf3c4`, `3529049` (Git name `xfas51`, linked on GitHub to Fatimah-Alshehab); PR #3 |
+| Wajd Alghamdi (202262140) | Frontend Development | Screens and services for trading and support; front-end rebuild with working flows and one design; selection-first redesign with on-device persistence | Commits `571dc10`, `00f3c80`, `a01d22c` |
+| Raghad Almaghrabi (202156390) | Frontend Development | Profile display and shared profile state; badges screen; wallet balance toggle, transaction details and credit guide; listing details and reviews page; skill posting forms and editing owned listings; My Trades; Safety Centre guidance; notification preferences. Built on branch `phase3/frontend`; parts were integrated into `main` in `3529049` | 16 commits on `phase3/frontend` (6 Nov), from `f50079c` to `91bbf2a`; co-author of `3529049` |
 
 ## AI assistance disclosure
 

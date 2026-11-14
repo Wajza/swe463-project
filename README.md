@@ -11,7 +11,7 @@ Souq Skills is a Flutter marketplace where members in Saudi Arabia trade skills 
 | Wajd Alghamdi | 202262140 | UI and UX |
 | Yasmeen Alshehri | 202271660 | Trade flow |
 | Fatimah Alshehab | 202278660 | Backend Developer B – Chat, Trades, Wallet, Group Trades, and Notifications |
-| Raghad Almaghrabi | 202156390 | Profile and quality |
+| Raghad Almaghrabi | 202156390 | Frontend, Profile and quality |
 
 ## Implemented Phase 3 features
 

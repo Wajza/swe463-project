@@ -1,5 +1,5 @@
 name: souq_skills
-description: "Phase 2 starter application for the Souq Skills skill-exchange marketplace."
+description: "Souq Skills (SWE 463 Phase 3): a Flutter and Firebase marketplace for exchanging skills without money."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev

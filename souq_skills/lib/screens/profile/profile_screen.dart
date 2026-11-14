@@ -17,6 +17,7 @@ import 'package:souq_skills/widgets/review_card.dart';
 import 'package:souq_skills/widgets/section_header.dart';
 import 'package:souq_skills/widgets/settings_group.dart';
 import 'package:souq_skills/widgets/settings_tile.dart';
+import 'package:souq_skills/widgets/skill_chips.dart';
 import 'package:souq_skills/widgets/stat_tile.dart';
 
 class ProfileScreen extends StatelessWidget {
@@ -38,6 +39,7 @@ class ProfileScreen extends StatelessWidget {
       final badges = BadgeService().badges();
       final earned = badges.where((badge) => badge.isEarned).length;
       final latest = reviews.latestForCurrentUser(limit: 3);
+      final user = ProfileService().currentUser;
       return AppPage(
         title: 'Profile',
         actions: [
@@ -48,7 +50,7 @@ class ProfileScreen extends StatelessWidget {
           ),
         ],
         children: [
-          ProfileHeader(user: ProfileService().currentUser),
+          ProfileHeader(user: user),
           const SizedBox(height: 16),
           Row(
             spacing: 10,
@@ -73,6 +75,14 @@ class ProfileScreen extends StatelessWidget {
               ),
             ],
           ),
+          SectionHeader(
+            title: 'I can share',
+            actionLabel: 'Edit',
+            onAction: () => context.open(AppRoutes.mySkills),
+          ),
+          SkillChips(skills: user.skillsOffered),
+          const SectionHeader(title: 'I want to learn'),
+          SkillChips(skills: user.skillsWanted),
           SectionHeader(title: 'Badges ($earned/${badges.length})'),
           BadgeStrip(badges: badges),
           const SectionHeader(title: 'Ratings and reviews'),

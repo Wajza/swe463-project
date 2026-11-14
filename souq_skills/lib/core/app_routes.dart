@@ -12,6 +12,7 @@ class AppRoutes {
   static const chats = '/chats';
   static const postSkill = '/post';
   static const wallet = '/wallet';
+  static const skillCredits = '/wallet/credits';
   static const profile = '/profile';
 
   // Discovery
@@ -20,6 +21,8 @@ class AppRoutes {
   // Listings and members
   static const createListing = '/listing/new';
   static const listingDetails = '/listing';
+  static const listingReviews = '/listing/reviews';
+  static const listingPublished = '/listing/published';
   static const editListing = '/listing/edit';
   static const shareListing = '/listing/share';
   static const myListings = '/my-listings';

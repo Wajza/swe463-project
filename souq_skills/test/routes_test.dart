@@ -17,6 +17,8 @@ const _routeArguments = <String, Object>{
   ),
   AppRoutes.createAccountProfile: '501234567',
   AppRoutes.listingDetails: 'l-flutter',
+  AppRoutes.listingReviews: 'l-flutter',
+  AppRoutes.listingPublished: 'l-yara-ui',
   AppRoutes.editListing: 'l-yara-ui',
   AppRoutes.shareListing: 'l-flutter',
   AppRoutes.memberProfile: 'm-sami',

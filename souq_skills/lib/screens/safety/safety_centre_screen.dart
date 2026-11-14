@@ -86,17 +86,26 @@ class _SafetyCentreScreenState extends State<SafetyCentreScreen> {
                 tiles: [
                   InfoTile(
                     label: 'Meet safely',
-                    value: 'Choose public places for in-person sessions.',
+                    value:
+                        'Meet in public first: a café, library or '
+                        'community space.',
                     icon: Icons.place_outlined,
                   ),
                   InfoTile(
+                    label: 'Keep plans in chat',
+                    value: 'So both members stay clear on what was agreed.',
+                    icon: Icons.chat_bubble_outline,
+                  ),
+                  InfoTile(
                     label: 'Protect your details',
-                    value: 'Keep personal information inside the app.',
+                    value: 'Share only what the exchange needs, in the app.',
                     icon: Icons.lock_outline,
                   ),
                   InfoTile(
                     label: 'Speak up',
-                    value: 'Report a member from their profile menu.',
+                    value:
+                        'Trust your instincts: leave, block, or report a '
+                        'member from their profile menu.',
                     icon: Icons.flag_outlined,
                   ),
                 ],

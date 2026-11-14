@@ -17,8 +17,10 @@ import 'package:souq_skills/screens/group_trades/group_trades_list_screen.dart';
 import 'package:souq_skills/screens/home/saved_skills_screen.dart';
 import 'package:souq_skills/screens/listings/edit_listing_screen.dart';
 import 'package:souq_skills/screens/listings/listing_details_screen.dart';
+import 'package:souq_skills/screens/listings/listing_reviews_screen.dart';
 import 'package:souq_skills/screens/listings/my_listings_screen.dart';
 import 'package:souq_skills/screens/listings/post_skill/post_skill_screen.dart';
+import 'package:souq_skills/screens/listings/post_skill/published_screen.dart';
 import 'package:souq_skills/screens/notifications/notifications_screen.dart';
 import 'package:souq_skills/screens/profile/badges_screen.dart';
 import 'package:souq_skills/screens/profile/edit_profile_screen.dart';
@@ -42,6 +44,7 @@ import 'package:souq_skills/screens/trades/schedule_session_screen.dart';
 import 'package:souq_skills/screens/trades/trade_details_screen.dart';
 import 'package:souq_skills/screens/utility/not_found_screen.dart';
 import 'package:souq_skills/screens/utility/share_listing_screen.dart';
+import 'package:souq_skills/screens/wallet/skill_credits_screen.dart';
 
 typedef _PageBuilder = Widget Function(Object? arguments);
 
@@ -68,12 +71,19 @@ class AppRouter {
     AppRoutes.profile: _page(
       const MainShell(initialIndex: MainShell.profileTab),
     ),
+    AppRoutes.skillCredits: _page(const SkillCreditsScreen()),
     AppRoutes.savedSkills: _page(const SavedSkillsScreen()),
     AppRoutes.createListing: (arguments) => PostSkillScreen(
       initialKind: arguments is ListingKind ? arguments : ListingKind.solo,
     ),
     AppRoutes.listingDetails: _withArg<String>(
       (id) => ListingDetailsScreen(listingId: id),
+    ),
+    AppRoutes.listingReviews: _withArg<String>(
+      (id) => ListingReviewsScreen(listingId: id),
+    ),
+    AppRoutes.listingPublished: _withArg<String>(
+      (id) => PublishedScreen(listingId: id),
     ),
     AppRoutes.editListing: _withArg<String>(
       (id) => EditListingScreen(listingId: id),

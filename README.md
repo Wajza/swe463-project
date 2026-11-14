@@ -10,7 +10,7 @@ Souq Skills is a Flutter marketplace where members in Saudi Arabia trade skills 
 |---|---:|---|
 | Wajd Alghamdi | 202262140 | UI and UX |
 | Yasmeen Alshehri | 202271660 | Trade flow |
-| Fatimah Alshehab | 202278660 | Backend and data |
+| Fatimah Alshehab | 202278660 | Backend Developer B – Chat, Trades, Wallet, Group Trades, and Notifications |
 | Raghad Almaghrabi | 202156390 | Profile and quality |
 
 ## Implemented Phase 3 features
@@ -330,7 +330,8 @@ Changes to these are saved online first and only then shown on the device. On fa
 - A member whose public profile is not published yet (an older account before it next signs in) is shown as "Member".
 - **Listings refresh when Home opens and when pulled down,** not live, and all listings are loaded at once; search and filters run on the device.
 - **Device location picks the nearest listed city,** even if the member is outside Saudi Arabia.
-- **Notifications are in-app only** and are kept on the device; there are no push notifications.
+- **Notifications are local in-app notifications only.** They are generated while the app is open; background and push notifications are not supported.
+- **My Trades and Wallet have no online loading or error states.** `OnlineTrades.loadError` and `OnlineWallet.loadError` are recorded but not shown on these screens, and the online wallet balance shows 0 until it has loaded.
 - **Other members' public profiles are fetched once and then kept on the device;** changes they make show after the app is restarted on a new account or the copy is refreshed.
 - **Blocking is one-way and silent.** A blocked member is not told, and still sees the listings of the member who blocked them. Blocking hides their listings on Home and in Saved skills, and on their listing and profile it offers only Unblock. Direct chats are checked on the server: neither member can message the other while either has blocked them, and the sender is only told the message could not be sent.
 - **Android needs extra Firebase configuration** that is not in the repository (see *Firebase setup*).
@@ -358,9 +359,11 @@ Based on the November 2026 commits and pull requests. Merge commits are cited as
 | Member | Assigned task | Completed work | Evidence |
 |---|---|---|---|
 | Yasmeen Alshehri (202271660) | Backend Development | Firebase project setup, with the local Firebase config excluded from Git; phone authentication and profiles; profile and skills sync with Firestore; unique usernames and Firestore security rules; listings in Firestore; public profiles, blocking, reports and ratings; Phase 3 README update | Commits `3d323a2`, `4f906ab`, `205d890`, `8fa97f1`, `4f4090e`, `775a745`, `ed5d376`, `7d9b96e`, `6bd3b9e`, `4e4d76c`; PR #2 |
-| Fatimah Alshehab (202278660) | Backend Development | Firebase real-time chat; trades and proposals in Firebase; wallet and credits; online group trades; in-app notifications; integration of the frontend branch's features into `main` | Commits `80db108`, `b4783f7`, `f53b9dd`, `82450d8`, `85bf3c4`, `3529049` (Git name `xfas51`, linked on GitHub to Fatimah-Alshehab); PR #3 |
+| Fatimah Alshehab (202278660) | Backend Development | Firebase real-time chat; trades and proposals in Firebase; wallet and credits; online group trades; in-app notifications | Commits `80db108`, `b4783f7`, `f53b9dd`, `82450d8`, `85bf3c4` (Git name `xfas51`, linked on GitHub to Fatimah-Alshehab) |
 | Wajd Alghamdi (202262140) | Frontend Development | Screens and services for trading and support; front-end rebuild with working flows and one design; selection-first redesign with on-device persistence | Commits `571dc10`, `00f3c80`, `a01d22c` |
 | Raghad Almaghrabi (202156390) | Frontend Development | Profile display and shared profile state; badges screen; wallet balance toggle, transaction details and credit guide; listing details and reviews page; skill posting forms and editing owned listings; My Trades; Safety Centre guidance; notification preferences. Built on branch `phase3/frontend`; parts were integrated into `main` in `3529049` | 16 commits on `phase3/frontend` (6 Nov), from `f50079c` to `91bbf2a`; co-author of `3529049` |
+
+**Frontend A integration.** Commit `3529049` (pull request #3) integrates the Frontend A features from branch `phase3/frontend` into `main`. It was co-authored with Raghad Almaghrabi. The integrated features are Raghad's original work, listed in her row above; they are not part of the Backend Developer B work.
 
 ## AI assistance disclosure
 

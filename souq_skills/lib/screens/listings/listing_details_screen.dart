@@ -78,8 +78,27 @@ class ListingDetailsScreen extends StatelessWidget {
           ListingSummary(listing: listing),
           const SectionHeader(title: 'Offered by'),
           MemberTile(memberId: listing.ownerId),
-          if (reviews.isNotEmpty) const SectionHeader(title: 'Reviews'),
+          if (reviews.isNotEmpty)
+            SectionHeader(
+              title: 'Reviews',
+              actionLabel: 'See all',
+              onAction: () =>
+                  context.open(AppRoutes.listingReviews, args: listing.id),
+            ),
           ...reviews.map((review) => ReviewCard(review: review)),
+          if (!isMine)
+            Card(
+              child: ListTile(
+                leading: const Icon(Icons.shield_outlined),
+                title: const Text('Trade safely'),
+                subtitle: const Text(
+                  'Meet in public, keep plans in chat, and trust your '
+                  'instincts.',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => context.open(AppRoutes.safety),
+              ),
+            ),
         ],
       );
     },

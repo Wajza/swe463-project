@@ -29,11 +29,13 @@ class PostSkillScreen extends StatelessWidget {
       return;
     }
     if (!context.mounted) return;
-    context.resetThenOpen(
-      post.isGroup ? AppRoutes.groupTradeDetails : AppRoutes.listingDetails,
-      args: id,
-    );
-    context.showMessage(post.isGroup ? 'Group created' : 'Published');
+    if (post.isGroup) {
+      context.resetThenOpen(AppRoutes.groupTradeDetails, args: id);
+      context.showMessage('Group created');
+    } else {
+      // The success page says it was published and links to the listing.
+      context.resetThenOpen(AppRoutes.listingPublished, args: id);
+    }
   }
 
   @override

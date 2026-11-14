@@ -141,6 +141,11 @@ void main() {
     await tester.tap(find.text('Publish'));
     await tester.pumpAndSettle();
 
+    // The success page shows what was published and leads on to it.
+    expect(find.text('Your skill is out there'), findsOneWidget);
+    expect(find.text('Learn Baking'), findsOneWidget);
+    await tester.tap(find.text('View listing'));
+    await tester.pumpAndSettle();
     expect(find.text('Learn Baking'), findsOneWidget);
     expect(find.text('Edit listing'), findsOneWidget);
   });

@@ -174,6 +174,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Published'), findsOneWidget);
+      await tester.tap(find.text('View listing'));
+      await tester.pumpAndSettle();
       expect(find.text('Edit listing'), findsOneWidget);
       final published = ListingService().mine().singleWhere(
         (item) => item.title == 'Learn Baking' && item.id != 'abc',

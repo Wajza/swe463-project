@@ -17,9 +17,10 @@ rules_version = '2';
 //                      users/{uid} in the same transaction.
 // usernames/{key}      One claim per username, keyed by its trimmed,
 //                      lower-case form: { uid, username, claimedAt }.
-// reviews/{reviewId}   Ratings, once per member pair; readable by the two
-//                      members, and by others only while the rated member's
-//                      public profile is switched on.
+// reviews/{reviewId}   Ratings, once per member per completed trade or group
+//                      trade they shared; readable by the two members, and
+//                      by others only while the rated member's public
+//                      profile is switched on.
 // reports/{reportId}   Reports, complaints and disputes; each member can
 //                      only send and read their own, and nobody can change
 //                      or delete them from the app.
@@ -396,11 +397,18 @@ service cloud.firestore {
     //                     lib/data/review_repository.dart. Stored by uid
     //                     only: no names, phone or other profile data.
     //
-    // For now each member can rate another member once: the id is
-    // {reviewerUid}_{subjectUid}, so writing a second is an update, which is
-    // refused. Trades are still kept on each device, so `contextId` (the
-    // trade or group) is not checked: the server cannot yet confirm the
-    // trade happened, was completed, or included both members.
+    // Each member can rate another member once per exchange they completed
+    // together: the id is {reviewerUid}_{contextId}_{subjectUid}, so
+    // writing a second is an update, which is refused. `contextId` must be
+    // a trade (contextKind 'trade', trades/{contextId}) or group trade
+    // ('groupTrade', groupTrades/{contextId}) that is completed and has
+    // both members in it. Completed trades and groups never change again
+    // (see their rules below), so this stays true once checked.
+    //
+    // Reviews from before this have the id {reviewerUid}_{subjectUid} and
+    // were not checked against a trade. They are kept and read as before,
+    // but no new ones can be written, and one still counts as the rating
+    // of its own `contextId`, so that exchange is not rated twice.
     //
     // A member's received reviews can be read by the member themselves and
     // by the reviewer; anyone else only while the member's public profile
@@ -425,6 +433,35 @@ service cloud.firestore {
             || isPublicProfile(review.subjectId));
     }
 
+    function reviewPath(reviewId) {
+      return /databases/$(database)/documents/reviews/$(reviewId);
+    }
+
+    // The trade or group trade being rated, as its path. [kind] is checked
+    // by the caller to be 'trade' or 'groupTrade'.
+    function exchangePath(kind, contextId) {
+      return kind == 'trade' ? tradePath(contextId) : groupPath(contextId);
+    }
+
+    // The exchange is completed, and both the caller and [subjectId] took
+    // part: a trade's two participants, or a group's members. A trade id
+    // given as a group (or the other way round) is not found, so refused.
+    function isCompletedExchangeWith(kind, contextId, subjectId) {
+      let path = exchangePath(kind, contextId);
+      let members = kind == 'trade' ? 'participantIds' : 'memberIds';
+      return exists(path)
+        && get(path).data.status == 'completed'
+        && request.auth.uid in get(path).data[members]
+        && subjectId in get(path).data[members];
+    }
+
+    // No legacy review ({reviewerUid}_{subjectUid}) by the caller already
+    // rates [subjectId] for this same exchange.
+    function notRatedBefore(subjectId, contextId) {
+      let legacy = reviewPath(request.auth.uid + '_' + subjectId);
+      return !exists(legacy) || get(legacy).data.contextId != contextId;
+    }
+
     function isValidReview(reviewId) {
       let data = request.resource.data;
       return data.keys().hasOnly(['reviewerId', 'subjectId', 'rating', 'tags',
@@ -437,16 +474,18 @@ service cloud.firestore {
         && data.subjectId != request.auth.uid
         // A real account: never a demo id or a made-up one.
         && exists(profilePath(data.subjectId))
-        && reviewId == request.auth.uid + '_' + data.subjectId
         && data.rating is int && data.rating >= 1 && data.rating <= 5
         && data.tags is list && data.tags.size() <= 5
         && data.tags.toSet().size() == data.tags.size()
         && data.tags.hasOnly(ratingTags())
         && isSafeId(data.contextId)
         && data.contextKind in ['trade', 'groupTrade']
+        && reviewId == request.auth.uid + '_' + data.contextId + '_' + data.subjectId
         && (!data.keys().hasAny(['skillTitle'])
             || (data.skillTitle is string && data.skillTitle.size() <= 100))
-        && data.createdAt == request.time;
+        && data.createdAt == request.time
+        && isCompletedExchangeWith(data.contextKind, data.contextId, data.subjectId)
+        && notRatedBefore(data.subjectId, data.contextId);
     }
 
     match /reviews/{reviewId} {

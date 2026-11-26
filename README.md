@@ -159,7 +159,7 @@ flutter test
 
 ### Firestore security rules
 
-The rules in `firestore.rules` are tested against the Firestore emulator. This needs Node.js, Java 21 or newer, and the Firebase CLI. It runs against a local `demo-` project, so nothing reaches the real one. On 14 Nov 2026, all 189 rules tests passed on the `phase-3` commit.
+The rules in `firestore.rules` are tested against the Firestore emulator. This needs Node.js, Java 21 or newer, and the Firebase CLI. It runs against a local `demo-` project, so nothing reaches the real one. On 26 Nov 2026, all 216 rules tests passed (0 failed) on `main` at commit `883ddf5`.
 
 ```bash
 cd souq_skills

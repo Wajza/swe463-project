@@ -279,6 +279,112 @@ void main() {
     );
   });
 
+  group('profile limits', () {
+    /// [_profile] with every field at its limit.
+    final longest = _profile.copyWith(
+      firstName: 'x' * ProfileDocument.maxNameLength,
+      lastName: 'x' * ProfileDocument.maxNameLength,
+      city: 'x' * ProfileDocument.maxCityLength,
+      bio: 'x' * ProfileDocument.maxBioLength,
+      phone: '5' * ProfileDocument.maxPhoneLength,
+      availability: 'x' * ProfileDocument.maxAvailabilityLength,
+      skillsOffered: [
+        for (var i = 0; i < ProfileDocument.maxSkills; i++) 'Skill $i',
+      ],
+      skillsWanted: [
+        for (var i = 0; i < ProfileDocument.maxSkills; i++) 'Skill $i',
+      ],
+    );
+
+    test('are the ones the rules check', () {
+      expect(ProfileDocument.maxNameLength, 50);
+      expect(ProfileDocument.maxCityLength, 40);
+      expect(ProfileDocument.maxBioLength, 500);
+      expect(ProfileDocument.maxPhoneLength, 20);
+      expect(ProfileDocument.maxAvailabilityLength, 40);
+      expect(ProfileDocument.maxSkills, 50);
+    });
+
+    test('a profile at every limit is accepted', () {
+      ProfileDocument.validate(longest);
+      ProfileDocument.validate(_profile);
+    });
+
+    test('one past any limit is refused, explaining why', () {
+      String messageFor(User profile) {
+        try {
+          ProfileDocument.validate(profile);
+        } on ProfileException catch (error) {
+          return error.message;
+        }
+        fail('${profile.toJson()} must be refused');
+      }
+
+      expect(
+        messageFor(longest.copyWith(firstName: 'x' * 51)),
+        'First and last names can be at most 50 characters.',
+      );
+      expect(
+        messageFor(longest.copyWith(lastName: 'x' * 51)),
+        'First and last names can be at most 50 characters.',
+      );
+      expect(
+        messageFor(longest.copyWith(bio: 'x' * 501)),
+        'Your bio can be at most 500 characters.',
+      );
+      for (final tooLong in [
+        longest.copyWith(city: 'x' * 41),
+        longest.copyWith(availability: 'x' * 41),
+        longest.copyWith(phone: '5' * 21),
+      ]) {
+        expect(messageFor(tooLong), 'Some of your details are too long.');
+      }
+      for (final tooMany in [
+        longest.copyWith(skillsOffered: [...longest.skillsOffered, 'More']),
+        longest.copyWith(skillsWanted: [...longest.skillsWanted, 'More']),
+      ]) {
+        expect(
+          messageFor(tooMany),
+          'You can list at most 50 skills in each list.',
+        );
+      }
+    });
+
+    test('a refused profile saves nothing at all', () async {
+      final repository = DemoProfileRepository();
+
+      await expectLater(
+        repository.saveProfile(_uid, _profile.copyWith(bio: 'x' * 501)),
+        throwsA(isA<ProfileException>()),
+      );
+
+      expect(await repository.fetchProfile(_uid), isNull);
+      expect(repository.publicDataOf(_uid), isNull);
+      expect(repository.ownerOf('maha_z'), isNull);
+    });
+
+    test('a refused edit leaves the saved profile as it was', () async {
+      final repository = DemoProfileRepository();
+      await repository.saveProfile(_uid, _profile);
+
+      await expectLater(
+        repository.saveProfile(
+          _uid,
+          _profile.copyWith(bio: 'x' * 501, username: 'maha_new'),
+        ),
+        throwsA(isA<ProfileException>()),
+      );
+
+      expect(
+        (await repository.fetchProfile(_uid))!.toJson(),
+        _profile.toJson(),
+      );
+      expect(repository.publicDataOf(_uid)!['bio'], _profile.bio);
+      expect(repository.ownerOf('maha_z'), _uid);
+      expect(repository.ownerOf('maha_new'), isNull);
+    });
+  });
+
   group('visibility choices', () {
     const hidden = ProfileVisibility(showProfile: false, showLocation: false);
     const noLocation = ProfileVisibility(showLocation: false);

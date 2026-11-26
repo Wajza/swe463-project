@@ -41,7 +41,16 @@ class _Profiles extends DemoProfileRepository {
   bool failFetch = false;
   Completer<void>? holdSaves;
   bool failSaves = false;
+  bool failVisibility = false;
   int saves = 0;
+
+  @override
+  Future<ProfileVisibility?> fetchVisibility(String uid) async {
+    if (failVisibility) {
+      throw const ProfileException('Check your internet connection.');
+    }
+    return super.fetchVisibility(uid);
+  }
 
   /// How many fetches asked for [uid].
   int fetchesOf(String uid) => fetched.where((ids) => ids.contains(uid)).length;
@@ -324,6 +333,132 @@ void main() {
       expect(shown['profileVisible'], isFalse);
       expect(shown['bio'], '');
       expect(shown['skillsOffered'], isEmpty);
+    });
+  });
+
+  group('choices changed on another device since signing in', () {
+    Finder publicSwitch() =>
+        find.widgetWithText(SwitchListTile, 'Public profile');
+
+    /// Another device saves Maha's profile with [visibility], while this
+    /// one still shows its own, older settings.
+    Future<void> changedElsewhere(ProfileVisibility visibility) async =>
+        profiles.saveProfile(
+          _maha,
+          (await profiles.fetchProfile(_maha))!,
+          visibility: visibility,
+        );
+
+    /// What this device's settings say, to compare.
+    (bool, bool) deviceChoices() => (
+      ProfileService().settings.profileVisible,
+      ProfileService().settings.locationVisible,
+    );
+
+    testWidgets('an ordinary edit keeps the profile hidden', (tester) async {
+      await _start(tester);
+      await _signIn(tester);
+      await changedElsewhere(
+        const ProfileVisibility(showProfile: false, showLocation: false),
+      );
+      expect(deviceChoices(), (true, true));
+
+      await ProfileService().addOfferedSkill('Baking');
+      await ProfileService().saveProfile(
+        ProfileService().currentUser.copyWith(bio: 'A new bio.'),
+      );
+
+      final shown = profiles.publicDataOf(_maha)!;
+      expect(shown['profileVisible'], isFalse);
+      expect(shown['bio'], '');
+      expect(shown['skillsOffered'], isEmpty);
+      expect(shown['city'], '');
+      // The edits are saved, and this device now shows the choices too.
+      expect(
+        (await profiles.fetchProfile(_maha))!.skillsOffered,
+        contains('Baking'),
+      );
+      expect(deviceChoices(), (false, false));
+    });
+
+    testWidgets('changing the location does not make a hidden profile public', (
+      tester,
+    ) async {
+      await _start(tester);
+      await _signIn(tester);
+      await changedElsewhere(
+        const ProfileVisibility(showProfile: false, showLocation: false),
+      );
+
+      // As Edit profile saves it, sharing the location again.
+      await ProfileService().saveProfile(
+        ProfileService().currentUser.copyWith(city: 'Riyadh'),
+        locationVisible: true,
+      );
+
+      final shown = profiles.publicDataOf(_maha)!;
+      expect(shown['profileVisible'], isFalse);
+      expect(shown['city'], '');
+      expect(
+        profiles.storedDataOf(_maha),
+        allOf(
+          containsPair('profileVisible', false),
+          containsPair('locationVisible', true),
+        ),
+      );
+      expect(deviceChoices(), (false, true));
+    });
+
+    testWidgets('the Settings switch applies the new choice and keeps the '
+        'location as saved online', (tester) async {
+      await _start(tester);
+      await _signIn(tester);
+      // Location made private elsewhere; this device still shares it.
+      await changedElsewhere(const ProfileVisibility(showLocation: false));
+      await _openSettings(tester);
+
+      await tester.tap(publicSwitch());
+      await tester.pumpAndSettle();
+      expect(profiles.publicDataOf(_maha)!['profileVisible'], isFalse);
+      expect(deviceChoices(), (false, false));
+
+      await tester.tap(publicSwitch());
+      await tester.pumpAndSettle();
+      final shown = profiles.publicDataOf(_maha)!;
+      expect(shown['profileVisible'], isTrue);
+      expect(shown['bio'], 'Maha teaches.');
+      // Not shared again by this device's older setting.
+      expect(shown['city'], '');
+      expect(deviceChoices(), (true, false));
+      expect(tester.widget<SwitchListTile>(publicSwitch()).value, isTrue);
+    });
+
+    testWidgets('if the latest choices cannot be read, nothing is saved', (
+      tester,
+    ) async {
+      await _start(tester);
+      await _signIn(tester);
+      await changedElsewhere(
+        const ProfileVisibility(showProfile: false, showLocation: false),
+      );
+      profiles
+        ..failVisibility = true
+        ..saves = 0;
+      final before = ProfileService().currentUser.toJson();
+
+      await expectLater(
+        ProfileService().addOfferedSkill('Baking'),
+        throwsA(isA<ProfileException>()),
+      );
+      await expectLater(
+        ProfileService().updateVisibility(locationVisible: true),
+        throwsA(isA<ProfileException>()),
+      );
+
+      expect(profiles.saves, 0);
+      expect(profiles.publicDataOf(_maha)!['profileVisible'], isFalse);
+      expect(ProfileService().currentUser.toJson(), before);
+      expect(deviceChoices(), (true, true));
     });
   });
 

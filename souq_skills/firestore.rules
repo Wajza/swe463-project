@@ -5,6 +5,7 @@ rules_version = '2';
 //
 // users/{uid}          The member's own profile. Only they can read or write
 //                      it, so private fields such as `phone` stay private.
+//                      Only the app's profile fields, within size limits.
 // users/{uid}/saved/{listingId}
 //                      The listings this member saved: { listingId, savedAt }.
 //                      Private to the member, like the profile.
@@ -25,8 +26,9 @@ rules_version = '2';
 //                      only send and read their own, and nobody can change
 //                      or delete them from the app.
 // listings/{listingId} Skill listings every signed-in member can browse;
-//                      only the owner (`ownerId`, their uid) can change or
-//                      delete them. Never holds whether anyone saved it.
+//                      only the owner (`ownerId`, their uid), who has a
+//                      profile, can publish them, and only they can change
+//                      or delete them. Never holds whether anyone saved it.
 // conversations/{conversationId}
 //                      Direct chats between two real members, with the
 //                      latest message and each member's read time. Only the
@@ -110,17 +112,64 @@ service cloud.firestore {
         && claimedByCaller(request.resource.data.username);
     }
 
+    // The fields lib/data/profile_repository.dart writes to users/{uid}:
+    // ProfileDocument.toData, ProfileDocument.visibilityData and the two
+    // server times. Anything else is refused when written; fields left on
+    // older records may stay as they are.
+    function profileFields() {
+      return ['id', 'firstName', 'lastName', 'username', 'city', 'bio',
+              'phone', 'isVerified', 'skillsOffered', 'skillsWanted',
+              'availability', 'profileVisible', 'locationVisible',
+              'createdAt', 'updatedAt'];
+    }
+
+    // Each profile field that is present has its type, within the limits
+    // of ProfileDocument.validate. The public profile can only show these
+    // values or blanks, so it is bounded by them too. Skills are picked
+    // from the app's fixed list, so only how many is limited.
+    function hasValidProfileFields(data) {
+      return (!('firstName' in data) || isText(data.firstName, 0, 50))
+        && (!('lastName' in data) || isText(data.lastName, 0, 50))
+        && (!('city' in data) || isText(data.city, 0, 40))
+        && (!('bio' in data) || isText(data.bio, 0, 500))
+        && (!('phone' in data) || isText(data.phone, 0, 20))
+        && (!('availability' in data) || isText(data.availability, 0, 40))
+        && (!('isVerified' in data) || data.isVerified is bool)
+        && (!('skillsOffered' in data)
+            || (data.skillsOffered is list && data.skillsOffered.size() <= 50))
+        && (!('skillsWanted' in data)
+            || (data.skillsWanted is list && data.skillsWanted.size() <= 50))
+        && (!('profileVisible' in data) || data.profileVisible is bool)
+        && (!('locationVisible' in data) || data.locationVisible is bool);
+    }
+
     match /users/{uid} {
       allow get: if isOwner(uid);
       allow list: if false;
 
-      allow create: if isOwner(uid) && isValidProfile(uid);
+      // Only the profile fields, with the server's times if any.
+      allow create: if isOwner(uid) && isValidProfile(uid)
+        && request.resource.data.keys().hasOnly(profileFields())
+        && hasValidProfileFields(request.resource.data)
+        && (!('createdAt' in request.resource.data)
+            || request.resource.data.createdAt == request.time)
+        && (!('updatedAt' in request.resource.data)
+            || request.resource.data.updatedAt == request.time);
 
+      // Only profile fields may change, never `createdAt`; an older
+      // profile's other fields may stay but not change. The whole result
+      // must still be valid.
       allow update: if isOwner(uid)
         && isValidProfile(uid)
         && (sameUsername(resource.data.get('username', ''),
                          request.resource.data.username)
-            || releasedByCaller(resource.data.get('username', '')));
+            || releasedByCaller(resource.data.get('username', '')))
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(profileFields().removeAll(['createdAt']))
+        && hasValidProfileFields(request.resource.data)
+        && (!request.resource.data.diff(resource.data).affectedKeys()
+               .hasAny(['updatedAt'])
+            || request.resource.data.updatedAt == request.time);
 
       // The public profile goes in the same write, so it never outlives
       // the profile it shows.
@@ -296,10 +345,12 @@ service cloud.firestore {
     match /listings/{listingId} {
       allow get, list: if signedIn();
 
-      // Only for oneself, with exactly the listing fields and both
-      // timestamps set by the server.
+      // Only for oneself, by an account with a profile, with exactly the
+      // listing fields and both timestamps set by the server. Without the
+      // profile check, a listing could outlive its owner's deleted account.
       allow create: if signedIn()
         && request.resource.data.ownerId == request.auth.uid
+        && exists(profilePath(request.auth.uid))
         && request.resource.data.keys().hasOnly(
              listingFields().concat(['createdAt', 'updatedAt']))
         && hasValidListingFields(request.resource.data)

@@ -166,6 +166,43 @@ abstract final class ProfileDocument {
     availability: _text(data['availability']),
   );
 
+  /// Limits on what a profile holds, as `firestore.rules` checks them for
+  /// `users/{uid}`. The public profile shows only these values, or less.
+  static const maxNameLength = 50;
+  static const maxCityLength = 40;
+  static const maxBioLength = 500;
+  static const maxPhoneLength = 20;
+  static const maxAvailabilityLength = 40;
+  static const maxSkills = 50;
+
+  /// Checks [profile] against the limits before anything is saved, so a
+  /// refusal is explained rather than reported as a failed save. Throws a
+  /// [ProfileException].
+  static void validate(User profile) {
+    if (profile.firstName.length > maxNameLength ||
+        profile.lastName.length > maxNameLength) {
+      throw const ProfileException(
+        'First and last names can be at most $maxNameLength characters.',
+      );
+    }
+    if (profile.bio.length > maxBioLength) {
+      throw const ProfileException(
+        'Your bio can be at most $maxBioLength characters.',
+      );
+    }
+    if (profile.city.length > maxCityLength ||
+        profile.availability.length > maxAvailabilityLength ||
+        profile.phone.length > maxPhoneLength) {
+      throw const ProfileException('Some of your details are too long.');
+    }
+    if (profile.skillsOffered.length > maxSkills ||
+        profile.skillsWanted.length > maxSkills) {
+      throw const ProfileException(
+        'You can list at most $maxSkills skills in each list.',
+      );
+    }
+  }
+
   /// The fields to store for [profile] under [uid].
   static Map<String, dynamic> toData(String uid, User profile) => {
     ...profile.toJson(),
@@ -281,6 +318,7 @@ class FirebaseProfileRepository implements ProfileRepository {
     User profile, {
     ProfileVisibility visibility = const ProfileVisibility(),
   }) async {
+    ProfileDocument.validate(profile);
     final isVerified = _isPhoneVerified();
     final saved = await _guard(
       () => _firestore.runTransaction<bool>((transaction) async {
@@ -484,6 +522,7 @@ class DemoProfileRepository implements ProfileRepository {
     User profile, {
     ProfileVisibility visibility = const ProfileVisibility(),
   }) async {
+    ProfileDocument.validate(profile);
     final stored = _data[uid];
     final oldUsername = stored == null
         ? ''

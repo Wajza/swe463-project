@@ -14,7 +14,7 @@
 // in step with the Dart code.
 
 import { readFileSync } from 'node:fs';
-import { after, afterEach, before, describe, test } from 'node:test';
+import { after, afterEach, before, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   assertFails,
@@ -493,6 +493,126 @@ describe('writes the rules must refuse', () => {
   });
 });
 
+/// Claims 'maha_z' for ME and writes ME's private profile with [extra]
+/// fields in one batch, without a public profile: for checking the
+/// profile's own fields.
+function writeOwnProfile(extra = {}) {
+  const db = dbAs(ME);
+  const batch = writeBatch(db);
+  batch.set(doc(db, 'usernames', 'maha_z'), { uid: ME, username: 'maha_z', claimedAt: serverTimestamp() });
+  batch.set(doc(db, 'users', ME), { ...profile('maha_z'), id: ME, ...extra });
+  return batch.commit();
+}
+
+const longest = {
+  firstName: 'x'.repeat(50),
+  lastName: 'x'.repeat(50),
+  city: 'x'.repeat(40),
+  bio: 'x'.repeat(500),
+  phone: '5'.repeat(20),
+  availability: 'x'.repeat(40),
+  skillsOffered: Array.from({ length: 50 }, (_, i) => `Skill ${i}`),
+  skillsWanted: Array.from({ length: 50 }, (_, i) => `Skill ${i}`),
+};
+
+describe('profiles: fields and limits', () => {
+  test('every profile field the app writes is accepted, up to its limit', async () => {
+    assert.equal(await assertSucceeds(saveProfile(dbAs(ME), ME, fullProfile('maha_z', longest))), true);
+
+    const saved = await read(`users/${ME}`);
+    assert.equal(saved.bio.length, 500);
+    assert.equal(saved.skillsOffered.length, 50);
+    assert.equal((await read(`publicProfiles/${ME}`)).bio.length, 500);
+  });
+
+  test('each field is refused one past its limit', async () => {
+    for (const [field, value] of Object.entries(longest)) {
+      const tooLong = Array.isArray(value) ? [...value, 'One more'] : `${value}x`;
+      await assertFails(
+        saveProfile(dbAs(ME), ME, fullProfile('maha_z', { [field]: tooLong })),
+        `${field} one past its limit must be refused`,
+      );
+    }
+    assert.equal(await read(`users/${ME}`), undefined);
+  });
+
+  test('fields must have the right types', async () => {
+    for (const bad of [
+      { firstName: 42 },
+      { lastName: ['Alzahrani'] },
+      { city: null },
+      { bio: { text: 'Hello' } },
+      { phone: 512345678 },
+      { availability: true },
+      { isVerified: 'true' },
+      { skillsOffered: 'Calligraphy' },
+      { skillsWanted: { 0: 'Piano' } },
+      { profileVisible: 'yes' },
+      { locationVisible: 1 },
+    ]) {
+      await assertFails(writeOwnProfile(bad), `${JSON.stringify(bad)} must be refused`);
+    }
+    await assertSucceeds(writeOwnProfile({ profileVisible: false, locationVisible: false }));
+  });
+
+  test('no other fields can be stored, when created or later', async () => {
+    for (const extra of [{ role: 'admin' }, { isAdmin: true }, { rating: 5 }, { walletBalance: 9999 }]) {
+      await assertFails(writeOwnProfile(extra), `${JSON.stringify(extra)} must be refused`);
+    }
+    await saveProfile(dbAs(ME), ME, profile('maha_z'));
+    const ref = doc(dbAs(ME), 'users', ME);
+
+    await assertFails(updateDoc(ref, { role: 'admin' }));
+    await assertFails(setDoc(ref, { isAdmin: true }, { merge: true }));
+    // A profile field alone still can be.
+    await assertSucceeds(updateDoc(ref, { bio: 'Teaches calligraphy.' }));
+    assert.equal('role' in (await read(`users/${ME}`)), false);
+  });
+
+  test('an older profile keeps its extra fields and can still be saved', async () => {
+    await seed({
+      'usernames/maha_z': { uid: ME, username: 'maha_z', claimedAt: new Date(2026, 9, 1) },
+      [`users/${ME}`]: { ...profile('maha_z'), id: ME, legacyNote: 'from Phase 2' },
+    });
+
+    assert.equal(await assertSucceeds(saveProfile(dbAs(ME), ME, profile('maha_z', { bio: 'New bio' }))), true);
+    const saved = await read(`users/${ME}`);
+    assert.equal(saved.bio, 'New bio');
+    assert.equal(saved.legacyNote, 'from Phase 2');
+    // Kept as it is, but not changed or removed.
+    await assertFails(updateDoc(doc(dbAs(ME), 'users', ME), { legacyNote: 'changed' }));
+    await assertFails(updateDoc(doc(dbAs(ME), 'users', ME), { legacyNote: deleteField() }));
+  });
+
+  test('an older profile over a limit must shorten it to be saved', async () => {
+    await seed({
+      'usernames/maha_z': { uid: ME, username: 'maha_z', claimedAt: new Date(2026, 9, 1) },
+      [`users/${ME}`]: { ...profile('maha_z'), id: ME, bio: 'x'.repeat(800) },
+    });
+
+    await assertFails(saveProfile(dbAs(ME), ME, profile('maha_z', { bio: 'x'.repeat(800), city: 'Riyadh' })));
+    await assertSucceeds(saveProfile(dbAs(ME), ME, profile('maha_z', { bio: 'Shorter now.' })));
+  });
+
+  test('times come from the server, and createdAt never changes', async () => {
+    await assertFails(writeOwnProfile({ createdAt: new Date(2020, 0, 1) }));
+    await assertFails(writeOwnProfile({ updatedAt: new Date(2020, 0, 1) }));
+    await saveProfile(dbAs(ME), ME, profile('maha_z'));
+    const ref = doc(dbAs(ME), 'users', ME);
+
+    await assertFails(updateDoc(ref, { createdAt: serverTimestamp() }));
+    await assertFails(updateDoc(ref, { bio: 'New', updatedAt: new Date(2020, 0, 1) }));
+    await assertSucceeds(updateDoc(ref, { bio: 'New', updatedAt: serverTimestamp() }));
+  });
+
+  test('nothing over a limit can be published, as the private profile refuses it', async () => {
+    await assertFails(saveProfile(dbAs(ME), ME, fullProfile('maha_z', { bio: 'x'.repeat(501) })));
+
+    assert.equal(await read(`publicProfiles/${ME}`), undefined);
+    assert.equal(await read(`users/${ME}`), undefined);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Listings
 
@@ -556,6 +676,9 @@ function deleteListing(db, uid, id) {
 const ownListing = (owner = ME) => createListing(dbAs(owner), listingData(owner));
 
 describe('listings: app flows the rules must allow', () => {
+  // Only members with a profile can publish listings.
+  beforeEach(() => seedAccounts(ME, OTHER, THIRD));
+
   test('a member publishes a listing of their own', async () => {
     const id = await assertSucceeds(ownListing());
 
@@ -628,6 +751,27 @@ describe('listings: app flows the rules must allow', () => {
 });
 
 describe('listings: access the rules must refuse', () => {
+  // Only members with a profile can publish listings.
+  beforeEach(() => seedAccounts(ME, OTHER, THIRD));
+
+  test('a signed-in account without a profile cannot publish', async () => {
+    const noProfile = 'uid-no-profile';
+
+    await assertFails(createListing(dbAs(noProfile), listingData(noProfile)));
+    // Once it has one, it can.
+    await seedAccounts(noProfile);
+    await assertSucceeds(createListing(dbAs(noProfile), listingData(noProfile)));
+  });
+
+  test('an account cannot publish after its profile was deleted', async () => {
+    const id = await ownListing();
+    await assertSucceeds(deleteProfile(dbAs(ME), ME));
+
+    await assertFails(createListing(dbAs(ME), listingData(ME)));
+    // What it already had can still be cleaned up, as account deletion does.
+    await assertSucceeds(deleteListing(dbAs(ME), ME, id));
+  });
+
   test('signed-out visitors can neither read nor write listings', async () => {
     const id = await ownListing();
     const db = anonymousDb();
@@ -697,6 +841,9 @@ describe('listings: access the rules must refuse', () => {
 });
 
 describe('listings: data the rules must refuse', () => {
+  // Only members with a profile can publish listings.
+  beforeEach(() => seedAccounts(ME, OTHER, THIRD));
+
   test('isSaved is never stored on a shared listing', async () => {
     await assertFails(createListing(dbAs(ME), listingData(ME, { isSaved: true })));
     await assertFails(createListing(dbAs(ME), listingData(ME, { isSaved: false })));
@@ -825,6 +972,9 @@ async function fetchSavedIds(db, uid) {
 }
 
 describe('saved listings: what the rules must allow', () => {
+  // Only members with a profile can publish listings.
+  beforeEach(() => seedAccounts(ME, OTHER, THIRD));
+
   test('a member saves a listing, sees it, and unsaves it', async () => {
     const id = await ownListing(OTHER);
     const db = dbAs(ME);
@@ -880,6 +1030,9 @@ describe('saved listings: what the rules must allow', () => {
 });
 
 describe('saved listings: what the rules must refuse', () => {
+  // Only members with a profile can publish listings.
+  beforeEach(() => seedAccounts(ME, OTHER, THIRD));
+
   test('signed-out visitors can do nothing with saved listings', async () => {
     const id = await ownListing(OTHER);
     await saveListing(dbAs(ME), ME, id);

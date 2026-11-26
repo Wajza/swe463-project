@@ -421,10 +421,13 @@ void main() {
       expect(ReviewService().givenByCurrentUser().first.rating, 3);
     });
 
-    testWidgets('the rate screen knows a member already rated elsewhere', (
+    testWidgets('the rate screen knows this trade was rated elsewhere', (
       tester,
     ) async {
-      await reviews.createReview(_maha, _draftAbout(_sami));
+      await reviews.createReview(
+        _maha,
+        _draftAbout(_sami, contextId: _samiTrade),
+      );
 
       await tester.pumpWidget(
         _app(const RateTradeScreen(contextId: _samiTrade)),
@@ -432,6 +435,31 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Already rated'), findsOneWidget);
+    });
+
+    testWidgets('rating the member for another trade does not block this one', (
+      tester,
+    ) async {
+      // Rated online for another trade, on another device.
+      await reviews.createReview(_maha, _draftAbout(_sami));
+
+      await tester.pumpWidget(
+        _app(const RateTradeScreen(contextId: _samiTrade)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(ReviewService().hasRatedMember(_sami), isTrue);
+      expect(find.text('Already rated'), findsNothing);
+      expect(find.text('Rate your experience'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('4 stars'));
+      await tester.pump();
+      await tester.tap(find.text('Submit rating'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Rating saved to your profile'), findsOneWidget);
+      expect(reviews.storedData('uid-maha_t-real-sami_uid-sami'), isNotNull);
+      expect(reviews.storedData('uid-maha_t-elsewhere_uid-sami'), isNotNull);
     });
 
     test(

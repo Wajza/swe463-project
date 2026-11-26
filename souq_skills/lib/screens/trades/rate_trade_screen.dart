@@ -43,10 +43,9 @@ class _RateTradeScreenState extends State<RateTradeScreen> {
     );
   }
 
-  /// Rated this exchange, or online this member, before.
+  /// Rated this member for this exchange before.
   bool _alreadyRated(RatingRequest request) =>
-      _service.hasRated(widget.contextId) ||
-      _service.hasRatedMember(request.subjectId);
+      _service.hasRated(widget.contextId, subjectId: request.subjectId);
 
   Future<void> _submit(RatingRequest request) async {
     if (_saving) return;

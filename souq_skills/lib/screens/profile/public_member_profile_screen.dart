@@ -36,7 +36,7 @@ class _PublicMemberProfileScreenState extends State<PublicMemberProfileScreen> {
   String get memberId => widget.memberId;
 
   /// True while a member not yet known on this device is being fetched.
-  /// Members already known are shown straight away, without fetching.
+  /// Members already known are shown straight away, without waiting.
   late bool _fetching = MemberService().byId(memberId) == null;
 
   @override
@@ -46,11 +46,11 @@ class _PublicMemberProfileScreenState extends State<PublicMemberProfileScreen> {
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => ReviewService().refreshReviews([memberId]),
     );
-    if (_fetching) {
-      MemberService().loadMembers([memberId]).whenComplete(() {
-        if (mounted) setState(() => _fetching = false);
-      });
-    }
+    // Known members are shown at once and checked once per session in the
+    // background; the page shows the new copy when it arrives.
+    MemberService().loadMembers([memberId]).whenComplete(() {
+      if (mounted && _fetching) setState(() => _fetching = false);
+    });
   }
 
   Future<void> _block(BuildContext context, User member) async {

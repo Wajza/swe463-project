@@ -168,6 +168,8 @@ void main() {
     auth = _Auth();
     AuthService.repository = auth;
     AuthService.deviceAccount = MemoryDeviceAccountStore(_maha);
+    // Each test is a new app session.
+    MemberService.forgetChecked();
     await useProfiles(_Profiles());
     profiles.saves = 0;
     listings = DemoListingRepository(
@@ -209,6 +211,101 @@ void main() {
       expect(shown['username'], 'maha_new');
       expect(shown['city'], '');
       expect(shown.containsKey('phone'), isFalse);
+    });
+
+    testWidgets('a private location chosen at sign-up stays private on '
+        'another device', (tester) async {
+      await useProfiles(_Profiles(), publish: false);
+      await _start(tester);
+      await _signIn(tester, phone: '555555555');
+      await tester.enterText(_field('First name'), 'Maha');
+      await tester.enterText(_field('Last name'), 'Alzahrani');
+      await tester.enterText(_field('Username'), 'maha_new');
+      await tester.tap(find.text('Keep my location private'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Create account'));
+      await tester.pumpAndSettle();
+      // Kept with the private profile, not only on this device.
+      expect(
+        profiles.storedDataOf(_maha),
+        allOf(
+          containsPair('profileVisible', true),
+          containsPair('locationVisible', false),
+        ),
+      );
+
+      // A new device: nothing saved on it, owned by nobody known.
+      await tester.pumpWidget(const SizedBox());
+      repository
+        ..dataSource = MemoryDataSource()
+        ..reset();
+      AuthService.deviceAccount = MemoryDeviceAccountStore();
+      await _start(tester);
+      await _signIn(tester, phone: '555555555');
+
+      expect(ProfileService().settings.locationVisible, isFalse);
+      expect(ProfileService().settings.profileVisible, isTrue);
+      await ProfileService().addOfferedSkill('Baking');
+      final shown = profiles.publicDataOf(_maha)!;
+      expect(shown['skillsOffered'], contains('Baking'));
+      expect(shown['city'], '');
+    });
+
+    testWidgets(
+      'Edit profile explains a bio over the limit and saves nothing',
+      (tester) async {
+        await _start(tester);
+        await _signIn(tester);
+        await _openSettings(tester);
+        await tester.tap(find.text('Edit profile'));
+        await tester.pumpAndSettle();
+
+        await tester.enterText(_field('Bio (optional)'), 'x' * 501);
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('Your bio can be at most 500 characters.'),
+          findsOneWidget,
+        );
+        // Still editing (only Edit profile has this field), with nothing
+        // changed anywhere.
+        expect(_field('Bio (optional)'), findsOneWidget);
+        expect(find.text('Profile updated'), findsNothing);
+        expect(repository.currentUser.bio, 'Maha teaches.');
+        expect(profiles.storedDataOf(_maha)!['bio'], 'Maha teaches.');
+        expect(profiles.publicDataOf(_maha)!['bio'], 'Maha teaches.');
+
+        // At the limit, it saves.
+        await tester.enterText(_field('Bio (optional)'), 'x' * 500);
+        await tester.tap(find.text('Save'));
+        await tester.pumpAndSettle();
+        expect(find.text('Profile updated'), findsOneWidget);
+        expect(profiles.publicDataOf(_maha)!['bio'], hasLength(500));
+      },
+    );
+
+    testWidgets('sign-up explains a name over the limit and creates nothing', (
+      tester,
+    ) async {
+      await useProfiles(_Profiles(), publish: false);
+      await _start(tester);
+      await _signIn(tester, phone: '555555555');
+
+      await tester.enterText(_field('First name'), 'M' * 51);
+      await tester.enterText(_field('Last name'), 'Alzahrani');
+      await tester.enterText(_field('Username'), 'maha_new');
+      await tester.tap(find.text('Create account'));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('First and last names can be at most 50 characters.'),
+        findsOneWidget,
+      );
+      expect(find.text('About you'), findsOneWidget);
+      expect(await profiles.fetchProfile(_maha), isNull);
+      expect(profiles.publicDataOf(_maha), isNull);
+      expect(profiles.ownerOf('maha_new'), isNull);
     });
 
     test('profile and skill changes are published with the profile', () async {
@@ -607,6 +704,169 @@ void main() {
         findsWidgets,
       );
       expect(find.text('Calligraphy basics'), findsNothing);
+    });
+  });
+
+  group('members kept from an earlier session', () {
+    /// Maha's app has seen Sami; then Sami renames himself to Samir.
+    Future<void> seenThenRenamed() async {
+      await repository.restore();
+      AuthService().signIn();
+      await MemberService().loadMembers([_sami]);
+      expect(MemberService().nameOf(_sami), 'Sami Alharbi');
+      await profiles.saveProfile(
+        _sami,
+        _samiProfile.copyWith(firstName: 'Samir'),
+      );
+    }
+
+    /// Closes and reopens Maha's app, as a page refresh does: what is kept
+    /// on the device comes back, and a new app session starts.
+    Future<void> restart() async {
+      final source = repository.dataSource as MemoryDataSource;
+      await repository.save();
+      final saved = source.snapshot;
+      repository.reset();
+      source.snapshot = saved;
+      await repository.restore();
+      MemberService.forgetChecked();
+    }
+
+    test(
+      'are checked once in a new session, then show their new name',
+      () async {
+        await seenThenRenamed();
+        // Same session: the copy is not asked for again.
+        await MemberService().loadMembers([_sami]);
+        expect(MemberService().nameOf(_sami), 'Sami Alharbi');
+        expect(profiles.fetchesOf(_sami), 1);
+
+        await restart();
+        // Shown at once from this device, before anything is fetched.
+        expect(MemberService().nameOf(_sami), 'Sami Alharbi');
+
+        await MemberService().loadMembers([_sami]);
+
+        expect(MemberService().nameOf(_sami), 'Samir Alharbi');
+        expect(profiles.fetchesOf(_sami), 2);
+      },
+    );
+
+    test(
+      'are checked at most once per session; asking still refetches',
+      () async {
+        await seenThenRenamed();
+        await restart();
+
+        await MemberService().loadMembers([_sami]);
+        await MemberService().loadMembers([_sami, _sami]);
+        await ListingService().refresh();
+        await MemberService().loadMembers([_sami]);
+        expect(profiles.fetchesOf(_sami), 2);
+
+        // An explicit refresh is unchanged.
+        await MemberService().loadMembers([_sami], refresh: true);
+        expect(profiles.fetchesOf(_sami), 3);
+      },
+    );
+
+    test(
+      'keep their copy if the check fails, until the next session',
+      () async {
+        await seenThenRenamed();
+        await restart();
+        profiles.failFetch = true;
+
+        await MemberService().loadMembers([_sami]);
+        expect(MemberService().nameOf(_sami), 'Sami Alharbi');
+        expect(profiles.fetchesOf(_sami), 2);
+        // Not asked for again and again in this session, even once back
+        // online.
+        profiles.failFetch = false;
+        await MemberService().loadMembers([_sami]);
+        expect(profiles.fetchesOf(_sami), 2);
+        expect(MemberService().nameOf(_sami), 'Sami Alharbi');
+
+        await restart();
+        await MemberService().loadMembers([_sami]);
+        expect(profiles.fetchesOf(_sami), 3);
+        expect(MemberService().nameOf(_sami), 'Samir Alharbi');
+      },
+    );
+
+    test('keep their copy if no longer published, asked for once', () async {
+      await seenThenRenamed();
+      await profiles.deleteProfile(_sami);
+      await restart();
+
+      await MemberService().loadMembers([_sami]);
+      await MemberService().loadMembers([_sami]);
+
+      expect(MemberService().nameOf(_sami), 'Sami Alharbi');
+      expect(profiles.fetchesOf(_sami), 2);
+    });
+
+    test(
+      'a member not known yet who failed is still tried every time',
+      () async {
+        AuthService().signIn();
+        profiles.failFetch = true;
+
+        await MemberService().loadMembers([_sami]);
+        await MemberService().loadMembers([_sami]);
+        expect(MemberService().byId(_sami), isNull);
+        expect(profiles.fetchesOf(_sami), 2);
+
+        profiles.failFetch = false;
+        await MemberService().loadMembers([_sami]);
+        expect(MemberService().nameOf(_sami), 'Sami Alharbi');
+        expect(profiles.fetchesOf(_sami), 3);
+        // Then known, and checked: not asked for again.
+        await MemberService().loadMembers([_sami]);
+        expect(profiles.fetchesOf(_sami), 3);
+      },
+    );
+
+    testWidgets('their profile shows the copy at once, then the new name', (
+      tester,
+    ) async {
+      await seenThenRenamed();
+      await restart();
+      final slow = profiles.holdFetch = Completer<void>();
+
+      await tester.pumpWidget(
+        const MaterialApp(home: PublicMemberProfileScreen(memberId: _sami)),
+      );
+
+      // Straight away, without a spinner, while the check runs.
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('Sami Alharbi'), findsOneWidget);
+      expect(profiles.fetchesOf(_sami), 2);
+
+      slow.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Samir Alharbi'), findsOneWidget);
+      expect(find.text('Sami Alharbi'), findsNothing);
+    });
+
+    test('checks made for one account never count for another', () async {
+      await seenThenRenamed();
+      expect(profiles.fetchesOf(_sami), 1);
+
+      // Lina signs in on the same app, with Sami's copy still here.
+      auth.currentUid = _lina;
+      await MemberService().loadMembers([_sami]);
+
+      expect(profiles.fetchesOf(_sami), 2);
+      expect(MemberService().nameOf(_sami), 'Samir Alharbi');
+      // And a check still under way for Lina is not kept for Maha.
+      final slow = profiles.holdFetch = Completer<void>();
+      final loading = MemberService().loadMembers([_sami], refresh: true);
+      auth.currentUid = _maha;
+      slow.complete();
+      await loading;
+      await MemberService().loadMembers([_sami]);
+      expect(profiles.fetchesOf(_sami), 4);
     });
   });
 

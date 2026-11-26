@@ -4,10 +4,13 @@ import 'package:souq_skills/core/app_routes.dart';
 import 'package:souq_skills/core/app_theme.dart';
 import 'package:souq_skills/core/feedback.dart';
 import 'package:souq_skills/core/navigation.dart';
+import 'package:souq_skills/models/load_status.dart';
 import 'package:souq_skills/models/rating_request.dart';
 import 'package:souq_skills/models/user.dart';
-import 'package:souq_skills/screens/utility/not_found_screen.dart';
+import 'package:souq_skills/screens/shared/live_entity.dart';
+import 'package:souq_skills/services/group_trade_service.dart';
 import 'package:souq_skills/services/review_service.dart';
+import 'package:souq_skills/services/trade_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
 import 'package:souq_skills/widgets/form_section.dart';
 import 'package:souq_skills/widgets/multi_choice_chip_row.dart';
@@ -27,7 +30,23 @@ class RateTradeScreen extends StatefulWidget {
 
 class _RateTradeScreenState extends State<RateTradeScreen> {
   final _service = ReviewService();
-  late final RatingRequest? _request = _service.requestFor(widget.contextId);
+
+  /// What is being rated, kept once found so the member rated never
+  /// changes while the form is filled in. Looked for again until then: the
+  /// trade or group may still be loading, as when opened from a
+  /// notification just after signing in.
+  RatingRequest? _request;
+  RatingRequest? _findRequest() =>
+      _request ??= _service.requestFor(widget.contextId);
+
+  /// Trades, then group trades: this page is for either, so it is loading,
+  /// or failed, while the trades are, and otherwise while the groups are.
+  static LoadStatus _loadStatus() {
+    final trades = TradeService().loadStatus;
+    if (trades.isLoading || trades.error != null) return trades;
+    return GroupTradeService().loadStatus;
+  }
+
   List<String> _tags = const [];
   int _stars = 0;
   bool _saving = false;
@@ -70,11 +89,13 @@ class _RateTradeScreenState extends State<RateTradeScreen> {
     context.showMessage('Rating saved to your profile');
   }
 
+  /// While what is rated is missing, [LiveEntity] shows loading, a failure
+  /// with Try again, or, once everything has loaded, Page not found.
   @override
-  Widget build(BuildContext context) {
-    final request = _request;
-    if (request == null) return const NotFoundScreen();
-    return ValueListenableBuilder(
+  Widget build(BuildContext context) => LiveEntity<RatingRequest>(
+    find: _findRequest,
+    loadStatus: _loadStatus,
+    builder: (context, request) => ValueListenableBuilder(
       valueListenable: ReviewService.loadStates,
       builder: (context, _, _) {
         if (!_saved && !_saving && _alreadyRated(request)) {
@@ -90,8 +111,8 @@ class _RateTradeScreenState extends State<RateTradeScreen> {
         }
         return _form(context, request);
       },
-    );
-  }
+    ),
+  );
 
   Widget _form(BuildContext context, RatingRequest request) => AppPage(
     title: 'Rate your experience',

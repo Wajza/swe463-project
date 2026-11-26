@@ -441,6 +441,41 @@ void main() {
       expect(ProfileService().currentUser.name, 'Yara Alghamdi');
     });
 
+    testWidgets('offline, a hidden profile is still hidden after a restart, '
+        'and an edit is refused', (tester) async {
+      // The member hid their profile, then closed the app.
+      await repository.restore();
+      AuthService().signIn();
+      repository.updateSettings(
+        repository.settings.copyWith(
+          profileVisible: false,
+          locationVisible: false,
+        ),
+      );
+      await repository.save();
+      final saved = source.snapshot;
+      repository.reset();
+      source.snapshot = saved;
+      expect(_deviceChoices(), (true, true));
+      await deviceAccount.write(_uid);
+      AuthService.profiles = _FailingProfiles();
+
+      await tester.pumpWidget(const SouqSkillsApp());
+      await tester.pumpAndSettle();
+
+      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(_deviceChoices(), (false, false));
+      // While offline, an edit cannot go out with any choices at all.
+      await expectLater(
+        ProfileService().addOfferedSkill('Baking'),
+        throwsA(isA<ProfileException>()),
+      );
+      expect(
+        ProfileService().currentUser.skillsOffered,
+        isNot(contains('Baking')),
+      );
+    });
+
     testWidgets('an account without a profile is sent to sign in', (
       tester,
     ) async {

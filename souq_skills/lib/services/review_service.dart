@@ -120,28 +120,44 @@ class ReviewService {
     return total / reviews.length;
   }
 
-  Review? givenFor(String contextId) {
+  /// The current member's rating for the exchange [contextId]: of
+  /// [subjectId] when given, otherwise the first found (a trade has only one
+  /// member to rate). Legacy reviews count for the exchange they name.
+  Review? givenFor(String contextId, {String? subjectId}) {
     for (final review in _repo.reviews) {
-      if (review.authorId == _me && review.contextId == contextId) {
+      if (review.authorId == _me &&
+          review.contextId == contextId &&
+          (subjectId == null || review.subjectId == subjectId)) {
         return review;
       }
     }
     return null;
   }
 
-  bool hasRated(String contextId) => givenFor(contextId) != null;
-
-  /// Whether rating [contextId] would be accepted: it is finished, not
-  /// rated yet, and its member has not been rated online already.
-  bool canRate(String contextId) {
-    final request = requestFor(contextId);
-    return request != null &&
-        !hasRated(contextId) &&
-        !hasRatedMember(request.subjectId);
+  /// Whether the current member rated [subjectId] for the exchange
+  /// [contextId]. Without [subjectId]: whether everyone they can rate there
+  /// is rated, or, for an exchange that cannot be rated (any more), whether
+  /// they rated anyone there.
+  bool hasRated(String contextId, {String? subjectId}) {
+    if (subjectId != null) {
+      return givenFor(contextId, subjectId: subjectId) != null;
+    }
+    final requests = requestsFor(contextId);
+    if (requests.isEmpty) return givenFor(contextId) != null;
+    return requests.every(
+      (request) => givenFor(contextId, subjectId: request.subjectId) != null,
+    );
   }
 
-  /// Whether the current member already rated real member [memberId]
-  /// online, where each member can be rated once for now.
+  /// Whether rating [contextId] would be accepted for someone: it is
+  /// finished, and at least one of its other members is not rated for it
+  /// yet. Each member can be rated once per exchange.
+  bool canRate(String contextId) =>
+      requestsFor(contextId)
+          .any((request) => !hasRated(contextId, subjectId: request.subjectId));
+
+  /// Whether the current member rated real member [memberId] online for any
+  /// exchange. Not a limit on rating them again for another exchange.
   bool hasRatedMember(String memberId) => _repo.reviews.any(
     (item) =>
         item.authorId == _me &&
@@ -149,30 +165,53 @@ class ReviewService {
         _isOnlineReview(item),
   );
 
-  /// Returns what can be rated for a finished trade or group, otherwise null.
-  RatingRequest? requestFor(String contextId) {
+  /// Everyone the current member can rate for the finished trade or group
+  /// [contextId], rated already or not: a trade's other member, or each
+  /// other member of a group they belong to, organizer first. Empty if it
+  /// is not finished or not theirs.
+  List<RatingRequest> requestsFor(String contextId) {
     final trade = TradeService().byId(contextId);
     if (trade != null) {
-      if (!trade.isComplete) return null;
-      return RatingRequest(
-        contextId: contextId,
-        subjectId: trade.otherMemberId,
-        subjectName: MemberService().nameOf(trade.otherMemberId),
-        skillTitle: trade.requestedSkill,
-      );
+      if (!trade.isComplete) return const [];
+      return [
+        RatingRequest(
+          contextId: contextId,
+          subjectId: trade.otherMemberId,
+          subjectName: MemberService().nameOf(trade.otherMemberId),
+          skillTitle: trade.requestedSkill,
+        ),
+      ];
     }
-    final group = GroupTradeService().byId(contextId);
-    if (group == null || !group.isCompleted) return null;
-    final subjectId = group.ownerId != _me
-        ? group.ownerId
-        : group.memberIds.firstWhere((id) => id != _me, orElse: () => '');
-    if (subjectId.isEmpty) return null;
-    return RatingRequest(
-      contextId: contextId,
-      subjectId: subjectId,
-      subjectName: MemberService().nameOf(subjectId),
-      skillTitle: group.title,
-    );
+    final groups = GroupTradeService();
+    final group = groups.byId(contextId);
+    if (group == null || !group.isCompleted || !groups.isMember(group)) {
+      return const [];
+    }
+    final subjectIds = {
+      if (group.memberIds.contains(group.ownerId)) group.ownerId,
+      ...group.memberIds,
+    }..removeWhere((id) => id.isEmpty || id == _me);
+    return [
+      for (final subjectId in subjectIds)
+        RatingRequest(
+          contextId: contextId,
+          subjectId: subjectId,
+          subjectName: MemberService().nameOf(subjectId),
+          skillTitle: group.title,
+        ),
+    ];
+  }
+
+  /// What to rate next for the finished trade or group [contextId]: the
+  /// first member not rated for it yet, or, once everyone is, the first
+  /// member (so it can be shown as already rated). Null if nothing there can
+  /// be rated.
+  RatingRequest? requestFor(String contextId) {
+    final requests = requestsFor(contextId);
+    for (final request in requests) {
+      if (!hasRated(contextId, subjectId: request.subjectId)) return request;
+    }
+    return requests.firstOrNull;
   }
 
   /// Saves a rating on this device straight away. Kept for compatibility;
@@ -190,8 +229,9 @@ class ReviewService {
   /// A real member is rated online first, and only once saved there on this
   /// device; demo members, and everyone in the offline demo, on this device
   /// only. Throws a [ReviewException] and changes nothing if it fails, for
-  /// the current member, or if the member or exchange was already rated.
-  /// The same rating sent twice at once is sent once.
+  /// the current member, or if the member was already rated for this
+  /// exchange. The same rating sent twice at once is sent once; ratings of
+  /// other exchanges or members are sent separately.
   Future<Review> submitRating(
     RatingRequest request,
     int stars,
@@ -215,7 +255,9 @@ class ReviewService {
     final online = repository;
     if (online == null || !_isRealMember(subject)) {
       return Future.sync(() {
-        if (hasRated(request.contextId)) throw ReviewException.duplicate;
+        if (hasRated(request.contextId, subjectId: subject)) {
+          throw ReviewException.duplicate;
+        }
         ReviewDocument.validate(uid ?? 'device', draft);
         final saved = _saveOnDevice(request, stars, tags.join(' • '));
         if (SafetyService.isDemoMember(subject)) {
@@ -229,10 +271,11 @@ class ReviewService {
         const ReviewException('Your session has expired. Sign in again.'),
       );
     }
-    final key = '$uid $subject';
+    // One send per member per exchange, as the review's id.
+    final key = '$uid ${request.contextId} $subject';
     final sending = _sending[key];
     if (sending != null) return sending;
-    if (hasRated(request.contextId) || hasRatedMember(subject)) {
+    if (hasRated(request.contextId, subjectId: subject)) {
       return Future.error(ReviewException.duplicate);
     }
     return _sending[key] = _sendOnline(online, uid, draft)

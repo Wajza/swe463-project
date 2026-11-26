@@ -8,6 +8,7 @@ import 'package:souq_skills/data/auth_repository.dart';
 import 'package:souq_skills/data/device_account_store.dart';
 import 'package:souq_skills/data/profile_repository.dart';
 import 'package:souq_skills/data/review_repository.dart';
+import 'package:souq_skills/models/group_trade.dart';
 import 'package:souq_skills/models/rating_request.dart';
 import 'package:souq_skills/models/review.dart';
 import 'package:souq_skills/models/trade.dart';
@@ -54,7 +55,7 @@ class _Auth extends DemoAuthRepository {
 
 /// Reviews online; sending and loading can be held back or fail.
 class _Reviews extends DemoReviewRepository {
-  _Reviews({super.isPublic});
+  _Reviews({super.isPublic, super.documents});
 
   bool failWrites = false;
   bool failFetch = false;
@@ -107,10 +108,14 @@ User _user(String first, String last, String username, String phone) => User(
 Widget _app(Widget screen) =>
     MaterialApp(home: screen, onGenerateRoute: AppRouter.onGenerateRoute);
 
-ReviewDraft _draftAbout(String subject, {int rating = 5}) => ReviewDraft(
+ReviewDraft _draftAbout(
+  String subject, {
+  int rating = 5,
+  String contextId = 't-elsewhere',
+}) => ReviewDraft(
   subjectId: subject,
   rating: rating,
-  contextId: 't-elsewhere',
+  contextId: contextId,
   contextKind: ReviewContextKind.trade,
 );
 
@@ -207,7 +212,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Rating saved to your profile'), findsOneWidget);
-      final stored = reviews.storedData('uid-maha_uid-sami')!;
+      final stored = reviews.storedData('uid-maha_t-real-sami_uid-sami')!;
       expect(stored['reviewerId'], _maha);
       expect(stored['subjectId'], _sami);
       expect(stored['rating'], 4);
@@ -312,17 +317,79 @@ void main() {
       expect(reviews.writes, 0);
     });
 
-    test('a member is rated once, even for another trade', () async {
+    test('a member is rated once per trade', () async {
       await ReviewService().submitRating(requestFor(_samiTrade), 5, const []);
 
-      for (final trade in [_samiTrade, _secondSamiTrade]) {
-        await expectLater(
-          ReviewService().submitRating(requestFor(trade), 1, const []),
-          throwsA(same(ReviewException.duplicate)),
-        );
-      }
+      await expectLater(
+        ReviewService().submitRating(requestFor(_samiTrade), 1, const []),
+        throwsA(same(ReviewException.duplicate)),
+      );
       expect(reviews.writes, 1);
       expect(ReviewService().receivedBy(_sami).single.rating, 5);
+      expect(ReviewService().canRate(_samiTrade), isFalse);
+    });
+
+    test('the same member can be rated again for another trade', () async {
+      expect(ReviewService().canRate(_samiTrade), isTrue);
+      expect(ReviewService().canRate(_secondSamiTrade), isTrue);
+
+      await ReviewService().submitRating(requestFor(_samiTrade), 5, const []);
+      // Rating them for one trade leaves the other open.
+      expect(ReviewService().canRate(_samiTrade), isFalse);
+      expect(ReviewService().canRate(_secondSamiTrade), isTrue);
+      expect(ReviewService().hasRated(_secondSamiTrade), isFalse);
+
+      await ReviewService().submitRating(
+        requestFor(_secondSamiTrade),
+        3,
+        const [],
+      );
+
+      expect(reviews.writes, 2);
+      expect(reviews.storedData('uid-maha_t-real-sami_uid-sami')!['rating'], 5);
+      expect(
+        reviews.storedData('uid-maha_t-real-sami-2_uid-sami')!['rating'],
+        3,
+      );
+      expect([
+        for (final r in ReviewService().receivedBy(_sami)) r.contextId,
+      ], unorderedEquals([_samiTrade, _secondSamiTrade]));
+      expect(ReviewService().givenFor(_samiTrade)!.rating, 5);
+      expect(ReviewService().givenFor(_secondSamiTrade)!.rating, 3);
+      expect(ReviewService().canRate(_secondSamiTrade), isFalse);
+    });
+
+    test('ratings of different trades are sent separately', () async {
+      final sending = reviews.holdWrites = Completer<void>();
+      final first = ReviewService().submitRating(
+        requestFor(_samiTrade),
+        5,
+        const [],
+      );
+      final second = ReviewService().submitRating(
+        requestFor(_secondSamiTrade),
+        4,
+        const [],
+      );
+      // The same rating again while sending is the one already under way.
+      final firstAgain = ReviewService().submitRating(
+        requestFor(_samiTrade),
+        5,
+        const [],
+      );
+      expect(identical(firstAgain, first), isTrue);
+      expect(identical(second, first), isFalse);
+
+      sending.complete();
+      final saved = await Future.wait([first, second, firstAgain]);
+
+      expect(reviews.writes, 2);
+      expect(saved[0].id, saved[2].id);
+      expect(
+        {for (final review in saved) review.id},
+        {'uid-maha_t-real-sami_uid-sami', 'uid-maha_t-real-sami-2_uid-sami'},
+      );
+      expect(_onlineReviews(), hasLength(2));
     });
 
     test('invalid stars or tags are refused before sending', () async {
@@ -334,12 +401,15 @@ void main() {
         ReviewService().submitRating(requestFor(_samiTrade), 5, const ['Rude']),
         throwsA(same(ReviewException.invalidTags)),
       );
-      expect(reviews.storedData('uid-maha_uid-sami'), isNull);
+      expect(reviews.storedData('uid-maha_t-real-sami_uid-sami'), isNull);
       expect(ReviewService().hasRated(_samiTrade), isFalse);
     });
 
     test('a rating given on another device is refused and loaded', () async {
-      await reviews.createReview(_maha, _draftAbout(_sami, rating: 3));
+      await reviews.createReview(
+        _maha,
+        _draftAbout(_sami, rating: 3, contextId: _samiTrade),
+      );
 
       await expectLater(
         ReviewService().submitRating(requestFor(_samiTrade), 5, const []),
@@ -351,10 +421,13 @@ void main() {
       expect(ReviewService().givenByCurrentUser().first.rating, 3);
     });
 
-    testWidgets('the rate screen knows a member already rated elsewhere', (
+    testWidgets('the rate screen knows this trade was rated elsewhere', (
       tester,
     ) async {
-      await reviews.createReview(_maha, _draftAbout(_sami));
+      await reviews.createReview(
+        _maha,
+        _draftAbout(_sami, contextId: _samiTrade),
+      );
 
       await tester.pumpWidget(
         _app(const RateTradeScreen(contextId: _samiTrade)),
@@ -362,6 +435,31 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Already rated'), findsOneWidget);
+    });
+
+    testWidgets('rating the member for another trade does not block this one', (
+      tester,
+    ) async {
+      // Rated online for another trade, on another device.
+      await reviews.createReview(_maha, _draftAbout(_sami));
+
+      await tester.pumpWidget(
+        _app(const RateTradeScreen(contextId: _samiTrade)),
+      );
+      await tester.pumpAndSettle();
+
+      expect(ReviewService().hasRatedMember(_sami), isTrue);
+      expect(find.text('Already rated'), findsNothing);
+      expect(find.text('Rate your experience'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('4 stars'));
+      await tester.pump();
+      await tester.tap(find.text('Submit rating'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Rating saved to your profile'), findsOneWidget);
+      expect(reviews.storedData('uid-maha_t-real-sami_uid-sami'), isNotNull);
+      expect(reviews.storedData('uid-maha_t-elsewhere_uid-sami'), isNotNull);
     });
 
     test(
@@ -378,7 +476,7 @@ void main() {
         await rating;
 
         // Saved as Maha's, online only.
-        expect(reviews.storedData('uid-maha_uid-sami'), isNotNull);
+        expect(reviews.storedData('uid-maha_t-real-sami_uid-sami'), isNotNull);
         expect(_onlineReviews(), isEmpty);
         expect(ReviewService().hasRated(_samiTrade), isFalse);
       },
@@ -391,6 +489,182 @@ void main() {
         throwsA(isA<ReviewException>()),
       );
       expect(reviews.writes, 0);
+    });
+  });
+
+  group('group trades', () {
+    const groupId = 'g-real';
+    const group = GroupTrade(
+      id: groupId,
+      title: 'Design circle',
+      ownerId: _lina,
+      memberIds: [_lina, _me, _sami],
+      status: GroupTradeStatus.completed,
+    );
+
+    void addGroup(GroupTrade value) =>
+        repository.insert(repository.groupTrades, value);
+
+    test('each other member can be rated, organizer first', () {
+      addGroup(group);
+
+      expect(
+        [for (final r in ReviewService().requestsFor(groupId)) r.subjectId],
+        [_lina, _sami],
+      );
+      expect(ReviewService().requestFor(groupId)!.subjectId, _lina);
+      expect(ReviewService().requestFor(groupId)!.skillTitle, 'Design circle');
+      expect(ReviewService().canRate(groupId), isTrue);
+    });
+
+    test('every other member is rated once for the group', () async {
+      addGroup(group);
+
+      final first = requestFor(groupId);
+      await ReviewService().submitRating(first, 5, const []);
+      // Lina is rated; Sami is next, and the group is not done yet.
+      expect(ReviewService().hasRated(groupId, subjectId: _lina), isTrue);
+      expect(ReviewService().hasRated(groupId), isFalse);
+      expect(ReviewService().canRate(groupId), isTrue);
+      final second = requestFor(groupId);
+      expect(second.subjectId, _sami);
+
+      await ReviewService().submitRating(second, 4, const []);
+
+      expect(reviews.writes, 2);
+      expect(reviews.storedData('uid-maha_g-real_uid-lina'), isNotNull);
+      final stored = reviews.storedData('uid-maha_g-real_uid-sami')!;
+      expect(stored['contextKind'], 'groupTrade');
+      expect(stored['rating'], 4);
+      expect(ReviewService().hasRated(groupId), isTrue);
+      expect(ReviewService().canRate(groupId), isFalse);
+      // Once everyone is rated, the first member is shown as rated.
+      expect(requestFor(groupId).subjectId, _lina);
+    });
+
+    test('a group member cannot be rated twice for the group', () async {
+      addGroup(group);
+      final lina = requestFor(groupId);
+      await ReviewService().submitRating(lina, 5, const []);
+
+      await expectLater(
+        ReviewService().submitRating(lina, 1, const []),
+        throwsA(same(ReviewException.duplicate)),
+      );
+      expect(reviews.writes, 1);
+      expect(reviews.storedData('uid-maha_g-real_uid-lina')!['rating'], 5);
+    });
+
+    test('ratings of different group members are sent separately', () async {
+      addGroup(group);
+      final [lina, sami] = ReviewService().requestsFor(groupId);
+      final sending = reviews.holdWrites = Completer<void>();
+
+      final rateLina = ReviewService().submitRating(lina, 5, const []);
+      final rateSami = ReviewService().submitRating(sami, 4, const []);
+      expect(identical(rateLina, rateSami), isFalse);
+      sending.complete();
+      await Future.wait([rateLina, rateSami]);
+
+      expect(reviews.writes, 2);
+      expect(ReviewService().canRate(groupId), isFalse);
+    });
+
+    test('only a finished group the member belongs to can be rated', () {
+      addGroup(group.copyWith(id: 'g-open', status: GroupTradeStatus.open));
+      addGroup(
+        group.copyWith(id: 'g-not-mine', memberIds: const [_lina, _sami]),
+      );
+
+      for (final id in ['g-open', 'g-not-mine', 'g-missing']) {
+        expect(ReviewService().requestsFor(id), isEmpty, reason: id);
+        expect(ReviewService().requestFor(id), isNull, reason: id);
+        expect(ReviewService().canRate(id), isFalse, reason: id);
+      }
+    });
+  });
+
+  group('legacy reviews ({reviewerUid}_{subjectUid})', () {
+    /// Maha's rating of Sami from before ratings were per trade.
+    Map<String, dynamic> legacy(String contextId) => {
+      ...ReviewDocument.toData(
+        _maha,
+        _draftAbout(_sami, rating: 4, contextId: contextId),
+      ),
+      'createdAt': DateTime(2026, 11, 10),
+    };
+
+    void useReviews(_Reviews value) {
+      reviews = value;
+      ReviewService.repository = value;
+    }
+
+    test('still count as the rating of their own trade', () async {
+      useReviews(
+        _Reviews(documents: {'uid-maha_uid-sami': legacy(_samiTrade)}),
+      );
+      await ReviewService().refreshReviews(const [_me]);
+
+      expect(ReviewService().hasRated(_samiTrade), isTrue);
+      expect(ReviewService().canRate(_samiTrade), isFalse);
+      expect(ReviewService().givenFor(_samiTrade)!.id, 'uid-maha_uid-sami');
+      await expectLater(
+        ReviewService().submitRating(requestFor(_samiTrade), 5, const []),
+        throwsA(same(ReviewException.duplicate)),
+      );
+      expect(reviews.writes, 0);
+    });
+
+    test('are found online even before they are loaded here', () async {
+      useReviews(
+        _Reviews(documents: {'uid-maha_uid-sami': legacy(_samiTrade)}),
+      );
+
+      await expectLater(
+        ReviewService().submitRating(requestFor(_samiTrade), 5, const []),
+        throwsA(same(ReviewException.duplicate)),
+      );
+      await ReviewService().refreshReviews(const [_me]);
+      expect(ReviewService().hasRated(_samiTrade), isTrue);
+      expect(reviews.storedData('uid-maha_t-real-sami_uid-sami'), isNull);
+    });
+
+    test(
+      'leave other trades with the member open, counted once each',
+      () async {
+        useReviews(
+          _Reviews(documents: {'uid-maha_uid-sami': legacy(_samiTrade)}),
+        );
+        await ReviewService().refreshReviews(const [_me]);
+        expect(ReviewService().canRate(_secondSamiTrade), isTrue);
+
+        await ReviewService().submitRating(
+          requestFor(_secondSamiTrade),
+          2,
+          const [],
+        );
+        // Loading again keeps one copy of each.
+        await ReviewService().refreshReviews(const [_me], refresh: true);
+
+        expect(
+          [for (final r in _onlineReviews()) r.id],
+          unorderedEquals([
+            'uid-maha_uid-sami',
+            'uid-maha_t-real-sami-2_uid-sami',
+          ]),
+        );
+        expect(ReviewService().receivedBy(_sami), hasLength(2));
+      },
+    );
+
+    test('of an exchange no longer here do not block current trades', () async {
+      useReviews(_Reviews(documents: {'uid-maha_uid-sami': legacy('t-old')}));
+      await ReviewService().refreshReviews(const [_me]);
+
+      expect(ReviewService().hasRatedMember(_sami), isTrue);
+      expect(ReviewService().canRate(_samiTrade), isTrue);
+      await ReviewService().submitRating(requestFor(_samiTrade), 5, const []);
+      expect(reviews.writes, 1);
     });
   });
 
@@ -585,10 +859,12 @@ void main() {
       );
       // Lina's rating is not on this device, but is kept online.
       expect(
-        repository.reviews.where((r) => r.id == 'uid-lina_uid-sami'),
+        repository.reviews.where(
+          (r) => r.id == 'uid-lina_t-elsewhere_uid-sami',
+        ),
         isEmpty,
       );
-      expect(reviews.storedData('uid-lina_uid-sami'), isNotNull);
+      expect(reviews.storedData('uid-lina_t-elsewhere_uid-sami'), isNotNull);
 
       hidden.remove(_sami);
       await ReviewService().refreshReviews([_sami], refresh: true);

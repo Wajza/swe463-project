@@ -5,6 +5,7 @@ rules_version = '2';
 //
 // users/{uid}          The member's own profile. Only they can read or write
 //                      it, so private fields such as `phone` stay private.
+//                      Only the app's profile fields, within size limits.
 // users/{uid}/saved/{listingId}
 //                      The listings this member saved: { listingId, savedAt }.
 //                      Private to the member, like the profile.
@@ -17,15 +18,17 @@ rules_version = '2';
 //                      users/{uid} in the same transaction.
 // usernames/{key}      One claim per username, keyed by its trimmed,
 //                      lower-case form: { uid, username, claimedAt }.
-// reviews/{reviewId}   Ratings, once per member pair; readable by the two
-//                      members, and by others only while the rated member's
-//                      public profile is switched on.
+// reviews/{reviewId}   Ratings, once per member per completed trade or group
+//                      trade they shared; readable by the two members, and
+//                      by others only while the rated member's public
+//                      profile is switched on.
 // reports/{reportId}   Reports, complaints and disputes; each member can
 //                      only send and read their own, and nobody can change
 //                      or delete them from the app.
 // listings/{listingId} Skill listings every signed-in member can browse;
-//                      only the owner (`ownerId`, their uid) can change or
-//                      delete them. Never holds whether anyone saved it.
+//                      only the owner (`ownerId`, their uid), who has a
+//                      profile, can publish them, and only they can change
+//                      or delete them. Never holds whether anyone saved it.
 // conversations/{conversationId}
 //                      Direct chats between two real members, with the
 //                      latest message and each member's read time. Only the
@@ -109,17 +112,64 @@ service cloud.firestore {
         && claimedByCaller(request.resource.data.username);
     }
 
+    // The fields lib/data/profile_repository.dart writes to users/{uid}:
+    // ProfileDocument.toData, ProfileDocument.visibilityData and the two
+    // server times. Anything else is refused when written; fields left on
+    // older records may stay as they are.
+    function profileFields() {
+      return ['id', 'firstName', 'lastName', 'username', 'city', 'bio',
+              'phone', 'isVerified', 'skillsOffered', 'skillsWanted',
+              'availability', 'profileVisible', 'locationVisible',
+              'createdAt', 'updatedAt'];
+    }
+
+    // Each profile field that is present has its type, within the limits
+    // of ProfileDocument.validate. The public profile can only show these
+    // values or blanks, so it is bounded by them too. Skills are picked
+    // from the app's fixed list, so only how many is limited.
+    function hasValidProfileFields(data) {
+      return (!('firstName' in data) || isText(data.firstName, 0, 50))
+        && (!('lastName' in data) || isText(data.lastName, 0, 50))
+        && (!('city' in data) || isText(data.city, 0, 40))
+        && (!('bio' in data) || isText(data.bio, 0, 500))
+        && (!('phone' in data) || isText(data.phone, 0, 20))
+        && (!('availability' in data) || isText(data.availability, 0, 40))
+        && (!('isVerified' in data) || data.isVerified is bool)
+        && (!('skillsOffered' in data)
+            || (data.skillsOffered is list && data.skillsOffered.size() <= 50))
+        && (!('skillsWanted' in data)
+            || (data.skillsWanted is list && data.skillsWanted.size() <= 50))
+        && (!('profileVisible' in data) || data.profileVisible is bool)
+        && (!('locationVisible' in data) || data.locationVisible is bool);
+    }
+
     match /users/{uid} {
       allow get: if isOwner(uid);
       allow list: if false;
 
-      allow create: if isOwner(uid) && isValidProfile(uid);
+      // Only the profile fields, with the server's times if any.
+      allow create: if isOwner(uid) && isValidProfile(uid)
+        && request.resource.data.keys().hasOnly(profileFields())
+        && hasValidProfileFields(request.resource.data)
+        && (!('createdAt' in request.resource.data)
+            || request.resource.data.createdAt == request.time)
+        && (!('updatedAt' in request.resource.data)
+            || request.resource.data.updatedAt == request.time);
 
+      // Only profile fields may change, never `createdAt`; an older
+      // profile's other fields may stay but not change. The whole result
+      // must still be valid.
       allow update: if isOwner(uid)
         && isValidProfile(uid)
         && (sameUsername(resource.data.get('username', ''),
                          request.resource.data.username)
-            || releasedByCaller(resource.data.get('username', '')));
+            || releasedByCaller(resource.data.get('username', '')))
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(profileFields().removeAll(['createdAt']))
+        && hasValidProfileFields(request.resource.data)
+        && (!request.resource.data.diff(resource.data).affectedKeys()
+               .hasAny(['updatedAt'])
+            || request.resource.data.updatedAt == request.time);
 
       // The public profile goes in the same write, so it never outlives
       // the profile it shows.
@@ -295,10 +345,12 @@ service cloud.firestore {
     match /listings/{listingId} {
       allow get, list: if signedIn();
 
-      // Only for oneself, with exactly the listing fields and both
-      // timestamps set by the server.
+      // Only for oneself, by an account with a profile, with exactly the
+      // listing fields and both timestamps set by the server. Without the
+      // profile check, a listing could outlive its owner's deleted account.
       allow create: if signedIn()
         && request.resource.data.ownerId == request.auth.uid
+        && exists(profilePath(request.auth.uid))
         && request.resource.data.keys().hasOnly(
              listingFields().concat(['createdAt', 'updatedAt']))
         && hasValidListingFields(request.resource.data)
@@ -396,11 +448,18 @@ service cloud.firestore {
     //                     lib/data/review_repository.dart. Stored by uid
     //                     only: no names, phone or other profile data.
     //
-    // For now each member can rate another member once: the id is
-    // {reviewerUid}_{subjectUid}, so writing a second is an update, which is
-    // refused. Trades are still kept on each device, so `contextId` (the
-    // trade or group) is not checked: the server cannot yet confirm the
-    // trade happened, was completed, or included both members.
+    // Each member can rate another member once per exchange they completed
+    // together: the id is {reviewerUid}_{contextId}_{subjectUid}, so
+    // writing a second is an update, which is refused. `contextId` must be
+    // a trade (contextKind 'trade', trades/{contextId}) or group trade
+    // ('groupTrade', groupTrades/{contextId}) that is completed and has
+    // both members in it. Completed trades and groups never change again
+    // (see their rules below), so this stays true once checked.
+    //
+    // Reviews from before this have the id {reviewerUid}_{subjectUid} and
+    // were not checked against a trade. They are kept and read as before,
+    // but no new ones can be written, and one still counts as the rating
+    // of its own `contextId`, so that exchange is not rated twice.
     //
     // A member's received reviews can be read by the member themselves and
     // by the reviewer; anyone else only while the member's public profile
@@ -425,6 +484,35 @@ service cloud.firestore {
             || isPublicProfile(review.subjectId));
     }
 
+    function reviewPath(reviewId) {
+      return /databases/$(database)/documents/reviews/$(reviewId);
+    }
+
+    // The trade or group trade being rated, as its path. [kind] is checked
+    // by the caller to be 'trade' or 'groupTrade'.
+    function exchangePath(kind, contextId) {
+      return kind == 'trade' ? tradePath(contextId) : groupPath(contextId);
+    }
+
+    // The exchange is completed, and both the caller and [subjectId] took
+    // part: a trade's two participants, or a group's members. A trade id
+    // given as a group (or the other way round) is not found, so refused.
+    function isCompletedExchangeWith(kind, contextId, subjectId) {
+      let path = exchangePath(kind, contextId);
+      let members = kind == 'trade' ? 'participantIds' : 'memberIds';
+      return exists(path)
+        && get(path).data.status == 'completed'
+        && request.auth.uid in get(path).data[members]
+        && subjectId in get(path).data[members];
+    }
+
+    // No legacy review ({reviewerUid}_{subjectUid}) by the caller already
+    // rates [subjectId] for this same exchange.
+    function notRatedBefore(subjectId, contextId) {
+      let legacy = reviewPath(request.auth.uid + '_' + subjectId);
+      return !exists(legacy) || get(legacy).data.contextId != contextId;
+    }
+
     function isValidReview(reviewId) {
       let data = request.resource.data;
       return data.keys().hasOnly(['reviewerId', 'subjectId', 'rating', 'tags',
@@ -437,16 +525,18 @@ service cloud.firestore {
         && data.subjectId != request.auth.uid
         // A real account: never a demo id or a made-up one.
         && exists(profilePath(data.subjectId))
-        && reviewId == request.auth.uid + '_' + data.subjectId
         && data.rating is int && data.rating >= 1 && data.rating <= 5
         && data.tags is list && data.tags.size() <= 5
         && data.tags.toSet().size() == data.tags.size()
         && data.tags.hasOnly(ratingTags())
         && isSafeId(data.contextId)
         && data.contextKind in ['trade', 'groupTrade']
+        && reviewId == request.auth.uid + '_' + data.contextId + '_' + data.subjectId
         && (!data.keys().hasAny(['skillTitle'])
             || (data.skillTitle is string && data.skillTitle.size() <= 100))
-        && data.createdAt == request.time;
+        && data.createdAt == request.time
+        && isCompletedExchangeWith(data.contextKind, data.contextId, data.subjectId)
+        && notRatedBefore(data.subjectId, data.contextId);
     }
 
     match /reviews/{reviewId} {

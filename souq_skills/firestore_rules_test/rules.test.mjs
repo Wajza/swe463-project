@@ -14,7 +14,7 @@
 // in step with the Dart code.
 
 import { readFileSync } from 'node:fs';
-import { after, afterEach, before, describe, test } from 'node:test';
+import { after, afterEach, before, beforeEach, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   assertFails,
@@ -162,6 +162,9 @@ function saveProfile(db, uid, user, visibility = {}, { publish = true } = {}) {
       {
         ...user,
         id: uid,
+        // ProfileDocument.visibilityData: the member's own choices.
+        profileVisible: visibility.showProfile ?? true,
+        locationVisible: visibility.showLocation ?? true,
         ...(current.exists() ? {} : { createdAt: serverTimestamp() }),
         updatedAt: serverTimestamp(),
       },
@@ -308,6 +311,19 @@ describe('privacy', () => {
 
     await assertFails(getDoc(doc(dbAs(OTHER), 'users', ME)));
     await assertFails(getDoc(doc(anonymousDb(), 'users', ME)));
+  });
+
+  test('the sharing choices are saved with the profile, for the member only', async () => {
+    await assertSucceeds(saveProfile(dbAs(ME), ME, profile('maha_z'), { showProfile: false }));
+
+    const saved = (await assertSucceeds(getDoc(doc(dbAs(ME), 'users', ME)))).data();
+    assert.equal(saved.profileVisible, false);
+    assert.equal(saved.locationVisible, true);
+    await assertFails(getDoc(doc(dbAs(OTHER), 'users', ME)));
+    // Changed again by saving the profile with other choices.
+    await assertSucceeds(saveProfile(dbAs(ME), ME, profile('maha_z'), { showLocation: false }));
+    assert.equal((await read(`users/${ME}`)).profileVisible, true);
+    assert.equal((await read(`users/${ME}`)).locationVisible, false);
   });
 
   test('profiles and claims cannot be listed', async () => {
@@ -477,6 +493,126 @@ describe('writes the rules must refuse', () => {
   });
 });
 
+/// Claims 'maha_z' for ME and writes ME's private profile with [extra]
+/// fields in one batch, without a public profile: for checking the
+/// profile's own fields.
+function writeOwnProfile(extra = {}) {
+  const db = dbAs(ME);
+  const batch = writeBatch(db);
+  batch.set(doc(db, 'usernames', 'maha_z'), { uid: ME, username: 'maha_z', claimedAt: serverTimestamp() });
+  batch.set(doc(db, 'users', ME), { ...profile('maha_z'), id: ME, ...extra });
+  return batch.commit();
+}
+
+const longest = {
+  firstName: 'x'.repeat(50),
+  lastName: 'x'.repeat(50),
+  city: 'x'.repeat(40),
+  bio: 'x'.repeat(500),
+  phone: '5'.repeat(20),
+  availability: 'x'.repeat(40),
+  skillsOffered: Array.from({ length: 50 }, (_, i) => `Skill ${i}`),
+  skillsWanted: Array.from({ length: 50 }, (_, i) => `Skill ${i}`),
+};
+
+describe('profiles: fields and limits', () => {
+  test('every profile field the app writes is accepted, up to its limit', async () => {
+    assert.equal(await assertSucceeds(saveProfile(dbAs(ME), ME, fullProfile('maha_z', longest))), true);
+
+    const saved = await read(`users/${ME}`);
+    assert.equal(saved.bio.length, 500);
+    assert.equal(saved.skillsOffered.length, 50);
+    assert.equal((await read(`publicProfiles/${ME}`)).bio.length, 500);
+  });
+
+  test('each field is refused one past its limit', async () => {
+    for (const [field, value] of Object.entries(longest)) {
+      const tooLong = Array.isArray(value) ? [...value, 'One more'] : `${value}x`;
+      await assertFails(
+        saveProfile(dbAs(ME), ME, fullProfile('maha_z', { [field]: tooLong })),
+        `${field} one past its limit must be refused`,
+      );
+    }
+    assert.equal(await read(`users/${ME}`), undefined);
+  });
+
+  test('fields must have the right types', async () => {
+    for (const bad of [
+      { firstName: 42 },
+      { lastName: ['Alzahrani'] },
+      { city: null },
+      { bio: { text: 'Hello' } },
+      { phone: 512345678 },
+      { availability: true },
+      { isVerified: 'true' },
+      { skillsOffered: 'Calligraphy' },
+      { skillsWanted: { 0: 'Piano' } },
+      { profileVisible: 'yes' },
+      { locationVisible: 1 },
+    ]) {
+      await assertFails(writeOwnProfile(bad), `${JSON.stringify(bad)} must be refused`);
+    }
+    await assertSucceeds(writeOwnProfile({ profileVisible: false, locationVisible: false }));
+  });
+
+  test('no other fields can be stored, when created or later', async () => {
+    for (const extra of [{ role: 'admin' }, { isAdmin: true }, { rating: 5 }, { walletBalance: 9999 }]) {
+      await assertFails(writeOwnProfile(extra), `${JSON.stringify(extra)} must be refused`);
+    }
+    await saveProfile(dbAs(ME), ME, profile('maha_z'));
+    const ref = doc(dbAs(ME), 'users', ME);
+
+    await assertFails(updateDoc(ref, { role: 'admin' }));
+    await assertFails(setDoc(ref, { isAdmin: true }, { merge: true }));
+    // A profile field alone still can be.
+    await assertSucceeds(updateDoc(ref, { bio: 'Teaches calligraphy.' }));
+    assert.equal('role' in (await read(`users/${ME}`)), false);
+  });
+
+  test('an older profile keeps its extra fields and can still be saved', async () => {
+    await seed({
+      'usernames/maha_z': { uid: ME, username: 'maha_z', claimedAt: new Date(2026, 9, 1) },
+      [`users/${ME}`]: { ...profile('maha_z'), id: ME, legacyNote: 'from Phase 2' },
+    });
+
+    assert.equal(await assertSucceeds(saveProfile(dbAs(ME), ME, profile('maha_z', { bio: 'New bio' }))), true);
+    const saved = await read(`users/${ME}`);
+    assert.equal(saved.bio, 'New bio');
+    assert.equal(saved.legacyNote, 'from Phase 2');
+    // Kept as it is, but not changed or removed.
+    await assertFails(updateDoc(doc(dbAs(ME), 'users', ME), { legacyNote: 'changed' }));
+    await assertFails(updateDoc(doc(dbAs(ME), 'users', ME), { legacyNote: deleteField() }));
+  });
+
+  test('an older profile over a limit must shorten it to be saved', async () => {
+    await seed({
+      'usernames/maha_z': { uid: ME, username: 'maha_z', claimedAt: new Date(2026, 9, 1) },
+      [`users/${ME}`]: { ...profile('maha_z'), id: ME, bio: 'x'.repeat(800) },
+    });
+
+    await assertFails(saveProfile(dbAs(ME), ME, profile('maha_z', { bio: 'x'.repeat(800), city: 'Riyadh' })));
+    await assertSucceeds(saveProfile(dbAs(ME), ME, profile('maha_z', { bio: 'Shorter now.' })));
+  });
+
+  test('times come from the server, and createdAt never changes', async () => {
+    await assertFails(writeOwnProfile({ createdAt: new Date(2020, 0, 1) }));
+    await assertFails(writeOwnProfile({ updatedAt: new Date(2020, 0, 1) }));
+    await saveProfile(dbAs(ME), ME, profile('maha_z'));
+    const ref = doc(dbAs(ME), 'users', ME);
+
+    await assertFails(updateDoc(ref, { createdAt: serverTimestamp() }));
+    await assertFails(updateDoc(ref, { bio: 'New', updatedAt: new Date(2020, 0, 1) }));
+    await assertSucceeds(updateDoc(ref, { bio: 'New', updatedAt: serverTimestamp() }));
+  });
+
+  test('nothing over a limit can be published, as the private profile refuses it', async () => {
+    await assertFails(saveProfile(dbAs(ME), ME, fullProfile('maha_z', { bio: 'x'.repeat(501) })));
+
+    assert.equal(await read(`publicProfiles/${ME}`), undefined);
+    assert.equal(await read(`users/${ME}`), undefined);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Listings
 
@@ -540,6 +676,9 @@ function deleteListing(db, uid, id) {
 const ownListing = (owner = ME) => createListing(dbAs(owner), listingData(owner));
 
 describe('listings: app flows the rules must allow', () => {
+  // Only members with a profile can publish listings.
+  beforeEach(() => seedAccounts(ME, OTHER, THIRD));
+
   test('a member publishes a listing of their own', async () => {
     const id = await assertSucceeds(ownListing());
 
@@ -612,6 +751,27 @@ describe('listings: app flows the rules must allow', () => {
 });
 
 describe('listings: access the rules must refuse', () => {
+  // Only members with a profile can publish listings.
+  beforeEach(() => seedAccounts(ME, OTHER, THIRD));
+
+  test('a signed-in account without a profile cannot publish', async () => {
+    const noProfile = 'uid-no-profile';
+
+    await assertFails(createListing(dbAs(noProfile), listingData(noProfile)));
+    // Once it has one, it can.
+    await seedAccounts(noProfile);
+    await assertSucceeds(createListing(dbAs(noProfile), listingData(noProfile)));
+  });
+
+  test('an account cannot publish after its profile was deleted', async () => {
+    const id = await ownListing();
+    await assertSucceeds(deleteProfile(dbAs(ME), ME));
+
+    await assertFails(createListing(dbAs(ME), listingData(ME)));
+    // What it already had can still be cleaned up, as account deletion does.
+    await assertSucceeds(deleteListing(dbAs(ME), ME, id));
+  });
+
   test('signed-out visitors can neither read nor write listings', async () => {
     const id = await ownListing();
     const db = anonymousDb();
@@ -681,6 +841,9 @@ describe('listings: access the rules must refuse', () => {
 });
 
 describe('listings: data the rules must refuse', () => {
+  // Only members with a profile can publish listings.
+  beforeEach(() => seedAccounts(ME, OTHER, THIRD));
+
   test('isSaved is never stored on a shared listing', async () => {
     await assertFails(createListing(dbAs(ME), listingData(ME, { isSaved: true })));
     await assertFails(createListing(dbAs(ME), listingData(ME, { isSaved: false })));
@@ -809,6 +972,9 @@ async function fetchSavedIds(db, uid) {
 }
 
 describe('saved listings: what the rules must allow', () => {
+  // Only members with a profile can publish listings.
+  beforeEach(() => seedAccounts(ME, OTHER, THIRD));
+
   test('a member saves a listing, sees it, and unsaves it', async () => {
     const id = await ownListing(OTHER);
     const db = dbAs(ME);
@@ -864,6 +1030,9 @@ describe('saved listings: what the rules must allow', () => {
 });
 
 describe('saved listings: what the rules must refuse', () => {
+  // Only members with a profile can publish listings.
+  beforeEach(() => seedAccounts(ME, OTHER, THIRD));
+
   test('signed-out visitors can do nothing with saved listings', async () => {
     const id = await ownListing(OTHER);
     await saveListing(dbAs(ME), ME, id);
@@ -1741,6 +1910,15 @@ describe('public profiles: the Public profile switch', () => {
 
 const reviewsOf = (db) => collection(db, 'reviews');
 
+/// The trade most review tests rate: a completed trade of ME and OTHER.
+const TRADE = 't-sami';
+
+/// Mirrors ReviewDocument.reviewIdFor.
+const reviewIdOf = (uid, subjectId, contextId = TRADE) => `${uid}_${contextId}_${subjectId}`;
+
+/// The id reviews had before they were per trade.
+const legacyReviewIdOf = (uid, subjectId) => `${uid}_${subjectId}`;
+
 /// What ReviewDocument.toData stores, plus the server time.
 function reviewData(uid, subjectId, extra = {}) {
   return {
@@ -1748,7 +1926,7 @@ function reviewData(uid, subjectId, extra = {}) {
     subjectId,
     rating: 5,
     tags: ['On time', 'Friendly'],
-    contextId: 't-sami',
+    contextId: TRADE,
     contextKind: 'trade',
     skillTitle: 'UI design',
     ...extra,
@@ -1757,17 +1935,27 @@ function reviewData(uid, subjectId, extra = {}) {
 }
 
 /// Mirrors FirebaseReviewRepository.createReview: looks for the reviewer's
-/// own earlier review of the same member, then writes it. Resolves to the
-/// id, or 'duplicate'.
+/// own earlier review of the same member for the same exchange (whatever
+/// its id), then writes it. Resolves to the id, or 'duplicate'.
 async function createReview(db, uid, subjectId, extra = {}) {
+  const data = reviewData(uid, subjectId, extra);
   const existing = await getDocs(
-    query(reviewsOf(db), where('reviewerId', '==', uid), where('subjectId', '==', subjectId), limit(1)),
+    query(
+      reviewsOf(db),
+      where('reviewerId', '==', uid),
+      where('subjectId', '==', subjectId),
+      where('contextId', '==', data.contextId),
+      limit(1),
+    ),
   );
   if (!existing.empty) return 'duplicate';
-  const id = `${uid}_${subjectId}`;
-  await setDoc(doc(db, 'reviews', id), reviewData(uid, subjectId, extra));
+  const id = reviewIdOf(uid, subjectId, data.contextId);
+  await setDoc(doc(db, 'reviews', id), data);
   return id;
 }
+
+/// Writes review [id] directly with [data], for what must be refused.
+const writeReview = (db, id, data) => setDoc(doc(db, 'reviews', id), data);
 
 /// Mirrors FirebaseReviewRepository.fetchReviewsAbout.
 async function fetchReviewsAbout(db, subjectId) {
@@ -1786,51 +1974,230 @@ async function publishProfile(uid, username, { visible = true } = {}) {
   await saveProfile(dbAs(uid), uid, fullProfile(username), { showProfile: visible });
 }
 
+/// A trade of [a] and [b] as FirebaseTradeRepository stores it, completed
+/// unless [status] says otherwise.
+async function seedTrade(a, b, { id = TRADE, status = 'completed' } = {}) {
+  await seed({
+    [`trades/${id}`]: {
+      participantIds: [a, b].sort(),
+      proposerId: a,
+      termsBy: a,
+      proposalId: `p-${id}`,
+      status,
+      ...terms(),
+      completedBy: status === 'completed' ? { [a]: new Date(), [b]: new Date() } : {},
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      updatedBy: b,
+    },
+  });
+}
+
+/// A group trade by [ownerId] with [memberIds], as
+/// FirebaseGroupTradeRepository stores it, completed unless [status] says
+/// otherwise.
+async function seedGroupTrade(id, ownerId, memberIds, { status = 'completed', invitedIds = [] } = {}) {
+  await seed({
+    [`groupTrades/${id}`]: {
+      ownerId,
+      memberIds,
+      invitedIds,
+      ...groupDetails(),
+      status,
+      completedBy:
+        status === 'completed' ? Object.fromEntries(memberIds.map((uid) => [uid, new Date()])) : {},
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      updatedBy: ownerId,
+    },
+  });
+}
+
+/// A review stored with the id reviews had before they were per trade.
+async function seedLegacyReview(uid, subjectId, extra = {}) {
+  const id = legacyReviewIdOf(uid, subjectId);
+  await seed({ [`reviews/${id}`]: { ...reviewData(uid, subjectId, extra), createdAt: new Date(2026, 10, 10) } });
+  return id;
+}
+
+/// Real accounts for ME and OTHER, with the completed trade TRADE.
+async function seedRatedTrade(...more) {
+  await seedAccounts(ME, OTHER, ...more);
+  await seedTrade(ME, OTHER);
+}
+
 describe('reviews: what the rules must allow', () => {
-  test('a member rates another member, once each way', async () => {
+  test('both members of a completed trade rate each other', async () => {
     await publishProfile(ME, 'maha_z');
     await publishProfile(OTHER, 'sami_a');
+    await seedTrade(ME, OTHER);
 
-    assert.equal(await assertSucceeds(createReview(dbAs(ME), ME, OTHER)), `${ME}_${OTHER}`);
-    assert.equal(await assertSucceeds(createReview(dbAs(OTHER), OTHER, ME)), `${OTHER}_${ME}`);
+    assert.equal(await assertSucceeds(createReview(dbAs(ME), ME, OTHER)), reviewIdOf(ME, OTHER));
+    assert.equal(await assertSucceeds(createReview(dbAs(OTHER), OTHER, ME)), reviewIdOf(OTHER, ME));
 
-    const stored = await read(`reviews/${ME}_${OTHER}`);
+    const stored = await read(`reviews/${reviewIdOf(ME, OTHER)}`);
     assert.deepEqual(Object.keys(stored).sort(), [
       'contextId', 'contextKind', 'createdAt', 'rating', 'reviewerId', 'skillTitle', 'subjectId', 'tags',
     ]);
+    assert.equal(stored.contextId, TRADE);
     assert.equal('phone' in stored, false);
+  });
+
+  test('a trade completed through the app can be rated', async () => {
+    const { tradeId } = await acceptedTrade();
+    await assertFails(createReview(dbAs(ME), ME, OTHER, { contextId: tradeId }));
+
+    await confirm(dbAs(ME), ME, tradeId);
+    await confirm(dbAs(OTHER), OTHER, tradeId);
+
+    assert.equal(
+      await assertSucceeds(createReview(dbAs(ME), ME, OTHER, { contextId: tradeId })),
+      reviewIdOf(ME, OTHER, tradeId),
+    );
+  });
+
+  test('the same member can be rated again for another completed trade', async () => {
+    await seedRatedTrade();
+    await seedTrade(ME, OTHER, { id: 't-sami-2' });
+    const db = dbAs(ME);
+
+    await assertSucceeds(createReview(db, ME, OTHER));
+    assert.equal(
+      await assertSucceeds(createReview(db, ME, OTHER, { contextId: 't-sami-2', rating: 3 })),
+      reviewIdOf(ME, OTHER, 't-sami-2'),
+    );
+
+    assert.deepEqual(await fetchReviewsBy(db, ME), [reviewIdOf(ME, OTHER), reviewIdOf(ME, OTHER, 't-sami-2')].sort());
+    assert.equal((await read(`reviews/${reviewIdOf(ME, OTHER)}`)).rating, 5);
+  });
+
+  test('each member of a completed group trade can rate each other member', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+    await seedGroupTrade('g-1', ME, [ME, OTHER, THIRD]);
+    const group = { contextId: 'g-1', contextKind: 'groupTrade' };
+
+    await assertSucceeds(createReview(dbAs(ME), ME, OTHER, group));
+    await assertSucceeds(createReview(dbAs(ME), ME, THIRD, group));
+    await assertSucceeds(createReview(dbAs(OTHER), OTHER, ME, group));
+    await assertSucceeds(createReview(dbAs(THIRD), THIRD, OTHER, group));
+
+    assert.deepEqual(await fetchReviewsBy(dbAs(ME), ME), [
+      reviewIdOf(ME, OTHER, 'g-1'),
+      reviewIdOf(ME, THIRD, 'g-1'),
+    ].sort());
+    assert.equal((await read(`reviews/${reviewIdOf(ME, THIRD, 'g-1')}`)).contextKind, 'groupTrade');
+  });
+
+  test('a group trade completed through the app can be rated', async () => {
+    const groupId = await groupOfThree();
+    const group = { contextId: groupId, contextKind: 'groupTrade' };
+    await assertFails(createReview(dbAs(OTHER), OTHER, THIRD, group));
+
+    for (const uid of [ME, OTHER, THIRD]) await confirmGroup(dbAs(uid), uid, groupId);
+
+    assert.equal(
+      await assertSucceeds(createReview(dbAs(OTHER), OTHER, THIRD, group)),
+      reviewIdOf(OTHER, THIRD, groupId),
+    );
   });
 
   test("anyone signed in can read a public member's reviews", async () => {
     await publishProfile(ME, 'maha_z');
     await publishProfile(OTHER, 'sami_a');
     await seedAccounts(THIRD);
+    await seedTrade(ME, OTHER);
     await createReview(dbAs(ME), ME, OTHER);
 
-    assert.deepEqual(await assertSucceeds(fetchReviewsAbout(dbAs(THIRD), OTHER)), [`${ME}_${OTHER}`]);
-    await assertSucceeds(getDoc(doc(dbAs(THIRD), 'reviews', `${ME}_${OTHER}`)));
+    assert.deepEqual(await assertSucceeds(fetchReviewsAbout(dbAs(THIRD), OTHER)), [reviewIdOf(ME, OTHER)]);
+    await assertSucceeds(getDoc(doc(dbAs(THIRD), 'reviews', reviewIdOf(ME, OTHER))));
   });
 
   test('a hidden member can still read their own reviews, and the reviewer theirs', async () => {
     await publishProfile(ME, 'maha_z');
     await publishProfile(OTHER, 'sami_a', { visible: false });
+    await seedTrade(ME, OTHER);
     await createReview(dbAs(ME), ME, OTHER);
 
-    assert.deepEqual(await assertSucceeds(fetchReviewsAbout(dbAs(OTHER), OTHER)), [`${ME}_${OTHER}`]);
-    assert.deepEqual(await assertSucceeds(fetchReviewsBy(dbAs(ME), ME)), [`${ME}_${OTHER}`]);
-    await assertSucceeds(getDoc(doc(dbAs(ME), 'reviews', `${ME}_${OTHER}`)));
+    assert.deepEqual(await assertSucceeds(fetchReviewsAbout(dbAs(OTHER), OTHER)), [reviewIdOf(ME, OTHER)]);
+    assert.deepEqual(await assertSucceeds(fetchReviewsBy(dbAs(ME), ME)), [reviewIdOf(ME, OTHER)]);
+    await assertSucceeds(getDoc(doc(dbAs(ME), 'reviews', reviewIdOf(ME, OTHER))));
   });
 
   test('reviews stay after either account is deleted', async () => {
     await publishProfile(ME, 'maha_z');
     await publishProfile(OTHER, 'sami_a');
+    await seedTrade(ME, OTHER);
     await createReview(dbAs(ME), ME, OTHER);
     await createReview(dbAs(OTHER), OTHER, ME);
 
     await deleteProfile(dbAs(ME), ME);
 
-    assert.ok(await read(`reviews/${ME}_${OTHER}`));
-    assert.ok(await read(`reviews/${OTHER}_${ME}`));
+    assert.ok(await read(`reviews/${reviewIdOf(ME, OTHER)}`));
+    assert.ok(await read(`reviews/${reviewIdOf(OTHER, ME)}`));
+  });
+});
+
+describe('reviews: legacy reviews ({reviewerUid}_{subjectUid})', () => {
+  test('stay readable by both members, and by others while the profile is public', async () => {
+    await publishProfile(ME, 'maha_z');
+    await publishProfile(OTHER, 'sami_a');
+    await seedAccounts(THIRD);
+    const legacy = await seedLegacyReview(ME, OTHER, { contextId: 't-old' });
+
+    assert.deepEqual(await assertSucceeds(fetchReviewsBy(dbAs(ME), ME)), [legacy]);
+    assert.deepEqual(await assertSucceeds(fetchReviewsAbout(dbAs(OTHER), OTHER)), [legacy]);
+    assert.deepEqual(await assertSucceeds(fetchReviewsAbout(dbAs(THIRD), OTHER)), [legacy]);
+    for (const uid of [ME, OTHER, THIRD]) {
+      await assertSucceeds(getDoc(doc(dbAs(uid), 'reviews', legacy)));
+    }
+  });
+
+  test('follow the Public profile switch, like new reviews', async () => {
+    await publishProfile(ME, 'maha_z');
+    await publishProfile(OTHER, 'sami_a', { visible: false });
+    await seedAccounts(THIRD);
+    const legacy = await seedLegacyReview(ME, OTHER);
+
+    await assertFails(fetchReviewsAbout(dbAs(THIRD), OTHER));
+    await assertFails(getDoc(doc(dbAs(THIRD), 'reviews', legacy)));
+    await assertSucceeds(fetchReviewsAbout(dbAs(OTHER), OTHER));
+  });
+
+  test('are listed once, alongside new reviews of other trades', async () => {
+    await publishProfile(ME, 'maha_z');
+    await publishProfile(OTHER, 'sami_a');
+    await seedTrade(ME, OTHER);
+    const legacy = await seedLegacyReview(ME, OTHER, { contextId: 't-old' });
+
+    assert.equal(await assertSucceeds(createReview(dbAs(ME), ME, OTHER)), reviewIdOf(ME, OTHER));
+
+    assert.deepEqual(await fetchReviewsAbout(dbAs(OTHER), OTHER), [legacy, reviewIdOf(ME, OTHER)].sort());
+    assert.equal((await read(`reviews/${legacy}`)).contextId, 't-old');
+  });
+
+  test('still count as the rating of their own trade, so it is not rated twice', async () => {
+    await seedRatedTrade();
+    const legacy = await seedLegacyReview(ME, OTHER, { rating: 4 });
+    const db = dbAs(ME);
+
+    // The app finds it by its fields...
+    assert.equal(await createReview(db, ME, OTHER, { rating: 1 }), 'duplicate');
+    // ...and the rules refuse a new-format one for the same trade anyway.
+    await assertFails(writeReview(db, reviewIdOf(ME, OTHER), reviewData(ME, OTHER, { rating: 1 })));
+    assert.equal(await read(`reviews/${reviewIdOf(ME, OTHER)}`), undefined);
+    assert.equal((await read(`reviews/${legacy}`)).rating, 4);
+  });
+
+  test('nobody can change or delete them, and no new ones can be written', async () => {
+    await seedRatedTrade();
+    const legacy = await seedLegacyReview(ME, OTHER, { contextId: 't-old' });
+
+    for (const db of [dbAs(ME), dbAs(OTHER)]) {
+      await assertFails(updateDoc(doc(db, 'reviews', legacy), { rating: 1 }));
+      await assertFails(deleteDoc(doc(db, 'reviews', legacy)));
+    }
+    // A legacy id for a new review, even of a completed trade.
+    await assertFails(writeReview(dbAs(OTHER), legacyReviewIdOf(OTHER, ME), reviewData(OTHER, ME)));
   });
 });
 
@@ -1839,16 +2206,18 @@ describe('reviews: what the rules must refuse', () => {
     await publishProfile(ME, 'maha_z');
     await publishProfile(OTHER, 'sami_a', { visible: false });
     await seedAccounts(THIRD);
+    await seedTrade(ME, OTHER);
     await createReview(dbAs(ME), ME, OTHER);
     const db = dbAs(THIRD);
 
     await assertFails(fetchReviewsAbout(db, OTHER));
-    await assertFails(getDoc(doc(db, 'reviews', `${ME}_${OTHER}`)));
+    await assertFails(getDoc(doc(db, 'reviews', reviewIdOf(ME, OTHER))));
   });
 
   test('reviews of a member without a public profile cannot be read by others', async () => {
     await publishProfile(ME, 'maha_z');
     await seedAccounts(OTHER, THIRD);
+    await seedTrade(ME, OTHER);
     await createReview(dbAs(ME), ME, OTHER);
 
     await assertFails(fetchReviewsAbout(dbAs(THIRD), OTHER));
@@ -1858,6 +2227,7 @@ describe('reviews: what the rules must refuse', () => {
     await publishProfile(ME, 'maha_z');
     await publishProfile(OTHER, 'sami_a');
     await seedAccounts(THIRD);
+    await seedTrade(ME, OTHER);
     await createReview(dbAs(ME), ME, OTHER);
     await assertSucceeds(fetchReviewsAbout(dbAs(THIRD), OTHER));
 
@@ -1869,6 +2239,7 @@ describe('reviews: what the rules must refuse', () => {
   test('unfiltered or unrelated lists of reviews', async () => {
     await publishProfile(ME, 'maha_z');
     await publishProfile(OTHER, 'sami_a', { visible: false });
+    await seedTrade(ME, OTHER);
     await createReview(dbAs(ME), ME, OTHER);
 
     await assertFails(getDocs(reviewsOf(dbAs(THIRD))));
@@ -1878,21 +2249,27 @@ describe('reviews: what the rules must refuse', () => {
   test('signed-out visitors can do nothing with reviews', async () => {
     await publishProfile(ME, 'maha_z');
     await publishProfile(OTHER, 'sami_a');
+    await seedTrade(ME, OTHER);
     await createReview(dbAs(ME), ME, OTHER);
     const db = anonymousDb();
 
     await assertFails(fetchReviewsAbout(db, OTHER));
-    await assertFails(getDoc(doc(db, 'reviews', `${ME}_${OTHER}`)));
-    await assertFails(setDoc(doc(db, 'reviews', `${ME}_${OTHER}`), reviewData(ME, OTHER)));
+    await assertFails(getDoc(doc(db, 'reviews', reviewIdOf(ME, OTHER))));
+    await assertFails(writeReview(db, reviewIdOf(ME, OTHER, 't-other'), reviewData(ME, OTHER, { contextId: 't-other' })));
   });
 
   test('a review must be written as oneself, never about oneself', async () => {
     await seedAccounts(ME, OTHER, THIRD);
+    // All three completed it together, so only who writes is wrong.
+    await seedGroupTrade('g-all', ME, [ME, OTHER, THIRD]);
+    const group = { contextId: 'g-all', contextKind: 'groupTrade' };
+    const db = dbAs(ME);
 
-    await assertFails(setDoc(doc(dbAs(ME), 'reviews', `${OTHER}_${THIRD}`), reviewData(OTHER, THIRD)));
+    await assertFails(writeReview(db, reviewIdOf(OTHER, THIRD, 'g-all'), reviewData(OTHER, THIRD, group)));
     // Under one's own id, but naming someone else as the reviewer.
-    await assertFails(setDoc(doc(dbAs(ME), 'reviews', `${ME}_${THIRD}`), reviewData(OTHER, THIRD)));
-    await assertFails(setDoc(doc(dbAs(ME), 'reviews', `${ME}_${ME}`), reviewData(ME, ME)));
+    await assertFails(writeReview(db, reviewIdOf(ME, THIRD, 'g-all'), reviewData(OTHER, THIRD, group)));
+    await assertFails(writeReview(db, reviewIdOf(ME, ME, 'g-all'), reviewData(ME, ME, group)));
+    await assertSucceeds(writeReview(db, reviewIdOf(ME, THIRD, 'g-all'), reviewData(ME, THIRD, group)));
   });
 
   test('only real accounts can be rated, never demo or made-up ids', async () => {
@@ -1900,47 +2277,146 @@ describe('reviews: what the rules must refuse', () => {
     const db = dbAs(ME);
 
     for (const subject of ['no-such-account', 'm-sami', 'me']) {
+      // Even with a completed trade naming them.
+      await seedTrade(ME, subject, { id: `t-${subject}` });
       await assertFails(
-        setDoc(doc(db, 'reviews', `${ME}_${subject}`), reviewData(ME, subject)),
+        writeReview(db, reviewIdOf(ME, subject, `t-${subject}`), reviewData(ME, subject, { contextId: `t-${subject}` })),
         `${subject} must be refused`,
       );
     }
   });
 
-  test('the id must be the reviewer and the rated member', async () => {
-    await seedAccounts(ME, OTHER, THIRD);
+  test('the id must be the reviewer, the trade and the rated member', async () => {
+    await seedRatedTrade(THIRD);
+    await seedTrade(ME, OTHER, { id: 't-sami-2' });
     const db = dbAs(ME);
+    const data = reviewData(ME, OTHER);
 
-    await assertFails(setDoc(doc(db, 'reviews', 'any-id'), reviewData(ME, OTHER)));
-    await assertFails(setDoc(doc(db, 'reviews', `${ME}_${THIRD}`), reviewData(ME, OTHER)));
-    await assertFails(setDoc(doc(db, 'reviews', `${OTHER}_${ME}`), reviewData(ME, OTHER)));
+    for (const id of [
+      'any-id',
+      legacyReviewIdOf(ME, OTHER),
+      reviewIdOf(ME, THIRD),
+      reviewIdOf(OTHER, ME),
+      reviewIdOf(ME, OTHER, 't-sami-2'),
+      `${TRADE}_${ME}_${OTHER}`,
+    ]) {
+      await assertFails(writeReview(db, id, data), `${id} must be refused`);
+    }
+    await assertSucceeds(writeReview(db, reviewIdOf(ME, OTHER), data));
   });
 
-  test('a second review of the same member is refused', async () => {
-    await seedAccounts(ME, OTHER);
+  test('a second review of the same member for the same trade is refused', async () => {
+    await seedRatedTrade();
     const db = dbAs(ME);
     await createReview(db, ME, OTHER);
 
     assert.equal(await createReview(db, ME, OTHER, { rating: 1 }), 'duplicate');
-    await assertFails(setDoc(doc(db, 'reviews', `${ME}_${OTHER}`), reviewData(ME, OTHER, { rating: 1 })));
-    assert.equal((await read(`reviews/${ME}_${OTHER}`)).rating, 5);
+    await assertFails(writeReview(db, reviewIdOf(ME, OTHER), reviewData(ME, OTHER, { rating: 1 })));
+    assert.equal((await read(`reviews/${reviewIdOf(ME, OTHER)}`)).rating, 5);
+    assert.deepEqual(await fetchReviewsBy(db, ME), [reviewIdOf(ME, OTHER)]);
+  });
+
+  test('a second review of the same group member for the same group is refused', async () => {
+    await seedAccounts(ME, OTHER, THIRD);
+    await seedGroupTrade('g-1', ME, [ME, OTHER, THIRD]);
+    const group = { contextId: 'g-1', contextKind: 'groupTrade' };
+    const db = dbAs(ME);
+    await createReview(db, ME, OTHER, group);
+
+    assert.equal(await createReview(db, ME, OTHER, { ...group, rating: 1 }), 'duplicate');
+    await assertFails(writeReview(db, reviewIdOf(ME, OTHER, 'g-1'), reviewData(ME, OTHER, { ...group, rating: 1 })));
+    assert.equal((await read(`reviews/${reviewIdOf(ME, OTHER, 'g-1')}`)).rating, 5);
+  });
+
+  test('a trade that is not completed cannot be rated', async () => {
+    await seedAccounts(ME, OTHER);
+    const db = dbAs(ME);
+
+    for (const status of ['pending', 'accepted', 'declined', 'cancelled', 'disputed']) {
+      const id = `t-${status}`;
+      await seedTrade(ME, OTHER, { id, status });
+      await assertFails(
+        writeReview(db, reviewIdOf(ME, OTHER, id), reviewData(ME, OTHER, { contextId: id })),
+        `a ${status} trade must be refused`,
+      );
+    }
+  });
+
+  test('a group trade that is not completed cannot be rated', async () => {
+    await seedAccounts(ME, OTHER);
+    const db = dbAs(ME);
+
+    for (const status of ['open', 'cancelled']) {
+      const id = `g-${status}`;
+      await seedGroupTrade(id, ME, [ME, OTHER], { status });
+      await assertFails(
+        writeReview(db, reviewIdOf(ME, OTHER, id), reviewData(ME, OTHER, { contextId: id, contextKind: 'groupTrade' })),
+        `a ${status} group must be refused`,
+      );
+    }
+  });
+
+  test('a trade that does not exist cannot be rated', async () => {
+    await seedAccounts(ME, OTHER);
+
+    await assertFails(
+      writeReview(dbAs(ME), reviewIdOf(ME, OTHER, 't-missing'), reviewData(ME, OTHER, { contextId: 't-missing' })),
+    );
+  });
+
+  test('only members of the trade can rate, and only each other', async () => {
+    await seedRatedTrade(THIRD);
+
+    // THIRD was not in it, as the reviewer...
+    await assertFails(writeReview(dbAs(THIRD), reviewIdOf(THIRD, OTHER), reviewData(THIRD, OTHER)));
+    await assertFails(writeReview(dbAs(THIRD), reviewIdOf(THIRD, ME), reviewData(THIRD, ME)));
+    // ...or as the member rated.
+    await assertFails(writeReview(dbAs(ME), reviewIdOf(ME, THIRD), reviewData(ME, THIRD)));
+  });
+
+  test('only members of the group can rate, and only each other', async () => {
+    await seedAccounts(ME, OTHER, THIRD, FOURTH);
+    // FOURTH was invited but never joined.
+    await seedGroupTrade('g-1', ME, [ME, OTHER, THIRD], { invitedIds: [FOURTH] });
+    const group = { contextId: 'g-1', contextKind: 'groupTrade' };
+
+    await assertFails(writeReview(dbAs(FOURTH), reviewIdOf(FOURTH, OTHER, 'g-1'), reviewData(FOURTH, OTHER, group)));
+    await assertFails(writeReview(dbAs(ME), reviewIdOf(ME, FOURTH, 'g-1'), reviewData(ME, FOURTH, group)));
+  });
+
+  test('the kind must match where the trade is kept', async () => {
+    await seedRatedTrade();
+    await seedGroupTrade('g-1', ME, [ME, OTHER]);
+    const db = dbAs(ME);
+
+    // A trade given as a group trade, and a group trade given as a trade.
+    await assertFails(writeReview(db, reviewIdOf(ME, OTHER), reviewData(ME, OTHER, { contextKind: 'groupTrade' })));
+    await assertFails(writeReview(db, reviewIdOf(ME, OTHER, 'g-1'), reviewData(ME, OTHER, { contextId: 'g-1' })));
+    // Neither, even for an existing trade.
+    for (const contextKind of ['listing', 'trades', '', null]) {
+      await assertFails(
+        writeReview(db, reviewIdOf(ME, OTHER), reviewData(ME, OTHER, { contextKind })),
+        `${contextKind} must be refused`,
+      );
+    }
+    await assertSucceeds(writeReview(db, reviewIdOf(ME, OTHER, 'g-1'), reviewData(ME, OTHER, { contextId: 'g-1', contextKind: 'groupTrade' })));
   });
 
   test('ratings must be whole stars from 1 to 5', async () => {
-    await seedAccounts(ME, OTHER);
+    await seedRatedTrade();
     const db = dbAs(ME);
 
     for (const rating of [0, 6, -1, 4.5, '5', null]) {
       await assertFails(
-        setDoc(doc(db, 'reviews', `${ME}_${OTHER}`), reviewData(ME, OTHER, { rating })),
+        writeReview(db, reviewIdOf(ME, OTHER), reviewData(ME, OTHER, { rating })),
         `${rating} must be refused`,
       );
     }
-    await assertSucceeds(setDoc(doc(db, 'reviews', `${ME}_${OTHER}`), reviewData(ME, OTHER, { rating: 1 })));
+    await assertSucceeds(writeReview(db, reviewIdOf(ME, OTHER), reviewData(ME, OTHER, { rating: 1 })));
   });
 
   test('tags must be the offered ones, at most five, without repeats', async () => {
-    await seedAccounts(ME, OTHER);
+    await seedRatedTrade();
     const db = dbAs(ME);
 
     for (const tags of [
@@ -1951,22 +2427,23 @@ describe('reviews: what the rules must refuse', () => {
       [7],
     ]) {
       await assertFails(
-        setDoc(doc(db, 'reviews', `${ME}_${OTHER}`), reviewData(ME, OTHER, { tags })),
+        writeReview(db, reviewIdOf(ME, OTHER), reviewData(ME, OTHER, { tags })),
         `${JSON.stringify(tags)} must be refused`,
       );
     }
     await assertSucceeds(
-      setDoc(
-        doc(db, 'reviews', `${ME}_${OTHER}`),
+      writeReview(
+        db,
+        reviewIdOf(ME, OTHER),
         reviewData(ME, OTHER, { tags: ['Great teacher', 'On time', 'Friendly', 'Well prepared', 'Would trade again'] }),
       ),
     );
   });
 
   test('only the review fields, with valid values, are accepted', async () => {
-    await seedAccounts(ME, OTHER);
+    await seedRatedTrade();
     const db = dbAs(ME);
-    const ref = doc(db, 'reviews', `${ME}_${OTHER}`);
+    const id = reviewIdOf(ME, OTHER);
 
     for (const bad of [
       { comment: 'Lovely' },
@@ -1976,17 +2453,17 @@ describe('reviews: what the rules must refuse', () => {
       { skillTitle: 'x'.repeat(101) },
       { createdAt: new Date(2020, 0, 1) },
     ]) {
-      await assertFails(setDoc(ref, { ...reviewData(ME, OTHER), ...bad }), `${JSON.stringify(bad)} must be refused`);
+      await assertFails(writeReview(db, id, { ...reviewData(ME, OTHER), ...bad }), `${JSON.stringify(bad)} must be refused`);
     }
     const { contextId, ...withoutContext } = reviewData(ME, OTHER);
     assert.ok(contextId);
-    await assertFails(setDoc(ref, withoutContext));
+    await assertFails(writeReview(db, id, withoutContext));
   });
 
   test('nobody can change or delete a review', async () => {
-    await seedAccounts(ME, OTHER);
+    await seedRatedTrade();
     await createReview(dbAs(ME), ME, OTHER);
-    const ref = (db) => doc(db, 'reviews', `${ME}_${OTHER}`);
+    const ref = (db) => doc(db, 'reviews', reviewIdOf(ME, OTHER));
 
     for (const db of [dbAs(ME), dbAs(OTHER)]) {
       await assertFails(updateDoc(ref(db), { rating: 1 }));

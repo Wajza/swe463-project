@@ -278,4 +278,239 @@ void main() {
       },
     );
   });
+
+  group('profile limits', () {
+    /// [_profile] with every field at its limit.
+    final longest = _profile.copyWith(
+      firstName: 'x' * ProfileDocument.maxNameLength,
+      lastName: 'x' * ProfileDocument.maxNameLength,
+      city: 'x' * ProfileDocument.maxCityLength,
+      bio: 'x' * ProfileDocument.maxBioLength,
+      phone: '5' * ProfileDocument.maxPhoneLength,
+      availability: 'x' * ProfileDocument.maxAvailabilityLength,
+      skillsOffered: [
+        for (var i = 0; i < ProfileDocument.maxSkills; i++) 'Skill $i',
+      ],
+      skillsWanted: [
+        for (var i = 0; i < ProfileDocument.maxSkills; i++) 'Skill $i',
+      ],
+    );
+
+    test('are the ones the rules check', () {
+      expect(ProfileDocument.maxNameLength, 50);
+      expect(ProfileDocument.maxCityLength, 40);
+      expect(ProfileDocument.maxBioLength, 500);
+      expect(ProfileDocument.maxPhoneLength, 20);
+      expect(ProfileDocument.maxAvailabilityLength, 40);
+      expect(ProfileDocument.maxSkills, 50);
+    });
+
+    test('a profile at every limit is accepted', () {
+      ProfileDocument.validate(longest);
+      ProfileDocument.validate(_profile);
+    });
+
+    test('one past any limit is refused, explaining why', () {
+      String messageFor(User profile) {
+        try {
+          ProfileDocument.validate(profile);
+        } on ProfileException catch (error) {
+          return error.message;
+        }
+        fail('${profile.toJson()} must be refused');
+      }
+
+      expect(
+        messageFor(longest.copyWith(firstName: 'x' * 51)),
+        'First and last names can be at most 50 characters.',
+      );
+      expect(
+        messageFor(longest.copyWith(lastName: 'x' * 51)),
+        'First and last names can be at most 50 characters.',
+      );
+      expect(
+        messageFor(longest.copyWith(bio: 'x' * 501)),
+        'Your bio can be at most 500 characters.',
+      );
+      for (final tooLong in [
+        longest.copyWith(city: 'x' * 41),
+        longest.copyWith(availability: 'x' * 41),
+        longest.copyWith(phone: '5' * 21),
+      ]) {
+        expect(messageFor(tooLong), 'Some of your details are too long.');
+      }
+      for (final tooMany in [
+        longest.copyWith(skillsOffered: [...longest.skillsOffered, 'More']),
+        longest.copyWith(skillsWanted: [...longest.skillsWanted, 'More']),
+      ]) {
+        expect(
+          messageFor(tooMany),
+          'You can list at most 50 skills in each list.',
+        );
+      }
+    });
+
+    test('a refused profile saves nothing at all', () async {
+      final repository = DemoProfileRepository();
+
+      await expectLater(
+        repository.saveProfile(_uid, _profile.copyWith(bio: 'x' * 501)),
+        throwsA(isA<ProfileException>()),
+      );
+
+      expect(await repository.fetchProfile(_uid), isNull);
+      expect(repository.publicDataOf(_uid), isNull);
+      expect(repository.ownerOf('maha_z'), isNull);
+    });
+
+    test('a refused edit leaves the saved profile as it was', () async {
+      final repository = DemoProfileRepository();
+      await repository.saveProfile(_uid, _profile);
+
+      await expectLater(
+        repository.saveProfile(
+          _uid,
+          _profile.copyWith(bio: 'x' * 501, username: 'maha_new'),
+        ),
+        throwsA(isA<ProfileException>()),
+      );
+
+      expect(
+        (await repository.fetchProfile(_uid))!.toJson(),
+        _profile.toJson(),
+      );
+      expect(repository.publicDataOf(_uid)!['bio'], _profile.bio);
+      expect(repository.ownerOf('maha_z'), _uid);
+      expect(repository.ownerOf('maha_new'), isNull);
+    });
+  });
+
+  group('visibility choices', () {
+    const hidden = ProfileVisibility(showProfile: false, showLocation: false);
+    const noLocation = ProfileVisibility(showLocation: false);
+
+    /// [visibility] as a record, to compare.
+    (bool, bool)? choices(ProfileVisibility? visibility) => visibility == null
+        ? null
+        : (visibility.showProfile, visibility.showLocation);
+
+    /// What a member published, as ProfileDocument.toPublicData writes it.
+    Map<String, dynamic> published(ProfileVisibility visibility) =>
+        ProfileDocument.toPublicData(
+          _uid,
+          _profile,
+          visibility,
+          isVerified: true,
+        );
+
+    test('are stored with the private profile, named as in settings', () {
+      expect(ProfileDocument.visibilityData(noLocation), {
+        'profileVisible': true,
+        'locationVisible': false,
+      });
+    });
+
+    test('stored choices are read back as they are', () {
+      for (final visibility in [
+        const ProfileVisibility(),
+        noLocation,
+        hidden,
+        const ProfileVisibility(showProfile: false),
+      ]) {
+        final data = {
+          ...ProfileDocument.toData(_uid, _profile),
+          ...ProfileDocument.visibilityData(visibility),
+        };
+        // Even if the public profile says otherwise.
+        expect(
+          choices(ProfileDocument.visibilityFrom(data, published(hidden))),
+          choices(visibility),
+        );
+      }
+    });
+
+    test('older profiles get them from their public profile', () {
+      final older = ProfileDocument.toData(_uid, _profile);
+      (bool, bool)? from(Map<String, dynamic>? publicData) =>
+          choices(ProfileDocument.visibilityFrom(older, publicData));
+
+      expect(from(published(const ProfileVisibility())), (true, true));
+      expect(from(published(noLocation)), (true, false));
+      // Hidden: the location choice cannot be known, so it stays private.
+      expect(from(published(hidden)), (false, false));
+      expect(from(published(const ProfileVisibility(showProfile: false))), (
+        false,
+        false,
+      ));
+      // Published before the switch existed: only an explicit true counts.
+      expect(
+        from(
+          {...published(const ProfileVisibility())}..remove('profileVisible'),
+        ),
+        (false, false),
+      );
+      // Never published: nothing to go by.
+      expect(from(null), isNull);
+    });
+
+    test('one stored choice without the other counts as not stored', () {
+      final partial = {
+        ...ProfileDocument.toData(_uid, _profile),
+        'profileVisible': false,
+      };
+      expect(
+        choices(
+          ProfileDocument.visibilityFrom(
+            partial,
+            published(const ProfileVisibility()),
+          ),
+        ),
+        (true, true),
+      );
+      expect(
+        choices(
+          ProfileDocument.visibilityFrom({
+            ...ProfileDocument.toData(_uid, _profile),
+            'profileVisible': 'no',
+            'locationVisible': true,
+          }, null),
+        ),
+        isNull,
+      );
+    });
+
+    test('are saved and read back by the repository', () async {
+      final repository = DemoProfileRepository();
+      await repository.saveProfile(_uid, _profile, visibility: noLocation);
+
+      expect(
+        repository.storedDataOf(_uid),
+        containsPair('locationVisible', false),
+      );
+      expect(
+        repository.storedDataOf(_uid),
+        containsPair('profileVisible', true),
+      );
+      expect(choices(await repository.fetchVisibility(_uid)), (true, false));
+      // The profile itself reads the same as before.
+      expect(
+        (await repository.fetchProfile(_uid))!.toJson(),
+        _profile.toJson(),
+      );
+
+      await repository.saveProfile(_uid, _profile, visibility: hidden);
+      expect(choices(await repository.fetchVisibility(_uid)), (false, false));
+    });
+
+    test('older accounts in the repository fall back, or have none', () async {
+      final repository = DemoProfileRepository(
+        profiles: {_uid: _profile, 'unpublished': _profile},
+        publicProfiles: {_uid: published(hidden)},
+      );
+
+      expect(choices(await repository.fetchVisibility(_uid)), (false, false));
+      expect(await repository.fetchVisibility('unpublished'), isNull);
+      expect(await repository.fetchVisibility('no-such-account'), isNull);
+    });
+  });
 }

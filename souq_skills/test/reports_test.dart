@@ -434,18 +434,6 @@ void main() {
       expect(TradeService().byId('t-sami')!.status, before);
       expect(_onlineCases(), isEmpty);
     });
-
-    test("the dispute screen's synchronous dispute still works as before", () {
-      final dispute = SafetyService().disputeTrade(
-        tradeId: 't-sami',
-        reason: 'Unsafe behaviour',
-      );
-
-      expect(TradeService().byId('t-sami')!.status, TradeStatus.disputed);
-      expect(SafetyService().caseById(dispute.id), isNotNull);
-      expect(dispute.id, startsWith('c-'));
-      expect(reports.writes, 0);
-    });
   });
 
   group('Safety Centre', () {
@@ -500,11 +488,7 @@ void main() {
         _maha,
         const ReportDraft(kind: CaseKind.complaint, reason: 'My wallet'),
       );
-      await tester.fling(
-        find.text('Meet safely'),
-        const Offset(0, 1500),
-        1000,
-      );
+      await tester.fling(find.text('Meet safely'), const Offset(0, 1500), 1000);
       await tester.pumpAndSettle();
       expect(find.text(elsewhere.caseNumber), findsOneWidget);
     });

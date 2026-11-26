@@ -131,6 +131,15 @@ class ReviewService {
 
   bool hasRated(String contextId) => givenFor(contextId) != null;
 
+  /// Whether rating [contextId] would be accepted: it is finished, not
+  /// rated yet, and its member has not been rated online already.
+  bool canRate(String contextId) {
+    final request = requestFor(contextId);
+    return request != null &&
+        !hasRated(contextId) &&
+        !hasRatedMember(request.subjectId);
+  }
+
   /// Whether the current member already rated real member [memberId]
   /// online, where each member can be rated once for now.
   bool hasRatedMember(String memberId) => _repo.reviews.any(

@@ -6,9 +6,12 @@ import 'package:souq_skills/services/profile_service.dart';
 import 'user_avatar.dart';
 
 class ProfileHeader extends StatelessWidget {
-  const ProfileHeader({required this.user, super.key});
+  const ProfileHeader({required this.user, this.level, super.key});
 
   final User user;
+
+  /// The member's level, shown on the avatar once it is known.
+  final int? level;
 
   String get _cityLabel {
     final isHidden =
@@ -20,7 +23,37 @@ class ProfileHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Column(
     children: [
-      UserAvatar(initials: user.initials, radius: 42),
+      Stack(
+        clipBehavior: Clip.none,
+        alignment: Alignment.bottomCenter,
+        children: [
+          UserAvatar(initials: user.initials, radius: 42),
+          if (level != null)
+            Positioned(
+              bottom: -8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 3,
+                ),
+                decoration: BoxDecoration(
+                  color: context.colors.surface,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: context.colors.primary, width: 1.5),
+                ),
+                child: Text(
+                  'Level $level',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: context.colors.primary,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+      if (level != null) const SizedBox(height: 8),
       const SizedBox(height: 12),
       Row(
         mainAxisAlignment: MainAxisAlignment.center,

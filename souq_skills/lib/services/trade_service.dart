@@ -1,5 +1,6 @@
 import 'package:souq_skills/core/app_routes.dart';
 import 'package:souq_skills/data/wallet_repository.dart';
+import 'package:souq_skills/models/load_status.dart';
 import 'package:souq_skills/models/notification.dart';
 import 'package:souq_skills/models/trade.dart';
 import 'package:souq_skills/models/transaction.dart';
@@ -38,6 +39,10 @@ class TradeService {
 
   /// Loads online trades again after a failure.
   void retry() => OnlineTrades.retry();
+
+  /// Where trades and their proposals come from, for screens showing one.
+  LoadStatus get loadStatus =>
+      LoadStatus(isLoading: isLoading, error: loadError, onRetry: retry);
 
   int completedCount() => all().where((trade) => trade.isComplete).length;
 

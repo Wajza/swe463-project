@@ -1,6 +1,7 @@
 import 'package:souq_skills/core/app_routes.dart';
 import 'package:souq_skills/data/wallet_repository.dart';
 import 'package:souq_skills/models/group_trade.dart';
+import 'package:souq_skills/models/load_status.dart';
 import 'package:souq_skills/models/notification.dart';
 import 'package:souq_skills/models/user.dart';
 
@@ -30,6 +31,16 @@ class GroupTradeService {
   static const _me = User.currentUserId;
 
   final Repository _repo = Repository.instance;
+
+  /// Where online groups come from, for screens showing one.
+  LoadStatus get loadStatus => LoadStatus(
+    isLoading:
+        OnlineGroups.isAvailable &&
+        !OnlineGroups.isLoaded &&
+        OnlineGroups.loadError == null,
+    error: OnlineGroups.loadError,
+    onRetry: OnlineGroups.retry,
+  );
 
   List<GroupTrade> all() => [...OnlineGroups.groups(), ..._repo.groupTrades]
       .where(

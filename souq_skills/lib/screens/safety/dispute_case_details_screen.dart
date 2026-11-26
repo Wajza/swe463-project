@@ -20,6 +20,8 @@ class DisputeCaseDetailsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LiveEntity<DisputeCase>(
     find: () => SafetyService().caseById(caseId),
+    loadStatus: () => SafetyService().reportsStatus,
+    alsoListenTo: [SafetyService.reportsState],
     builder: (context, item) {
       final tradeId = item.tradeId;
       final memberId = item.memberId;

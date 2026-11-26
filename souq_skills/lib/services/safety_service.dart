@@ -1,3 +1,4 @@
+import 'package:souq_skills/models/load_status.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:souq_skills/core/app_routes.dart';
@@ -186,10 +187,6 @@ class SafetyService {
 
   /// Opens a dispute online first; only once it is saved is the trade
   /// marked as disputed on this device, as [disputeTrade] does.
-  ///
-  /// The dispute screen still calls [disputeTrade], which stays on this
-  /// device; it should switch to this method, awaiting it and showing its
-  /// errors, for disputes to be shared online.
   Future<DisputeCase> submitTradeDispute({
     required String tradeId,
     required String reason,
@@ -221,13 +218,6 @@ class SafetyService {
       routeArgument: complaint.id,
     );
     return complaint;
-  }
-
-  /// Opens a dispute on this device only, straight away. Kept as it was
-  /// for the dispute screen; [submitTradeDispute] is the online version.
-  DisputeCase disputeTrade({required String tradeId, required String reason}) {
-    _markDisputed(tradeId);
-    return _file(CaseKind.tradeDispute, reason, tradeId: tradeId);
   }
 
   void _markDisputed(String tradeId) {
@@ -271,6 +261,17 @@ class SafetyService {
   /// Whether the cases on this device can be shown: always offline, and
   /// online once the signed-in account's reports have been loaded. Until
   /// then they may be another account's.
+  /// Where the member's reports come from, for screens showing one.
+  LoadStatus get reportsStatus {
+    if (hasCurrentReports) return LoadStatus.ready;
+    final state = reportsState.value;
+    return LoadStatus(
+      isLoading: !state.isFailed,
+      error: state.isFailed ? state.error : null,
+      onRetry: refreshReports,
+    );
+  }
+
   bool get hasCurrentReports =>
       reportRepository == null ||
       (_reportsLoadedFor != null &&

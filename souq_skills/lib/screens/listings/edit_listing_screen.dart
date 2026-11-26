@@ -83,6 +83,8 @@ class _EditListingScreenState extends State<EditListingScreen> {
   @override
   Widget build(BuildContext context) => LiveEntity<SkillListing>(
     find: () => ListingService().byId(widget.listingId),
+    loadStatus: () => ListingService().loadStatus,
+    alsoListenTo: [ListingService.loadState],
     builder: (context, listing) {
       if (!ListingService().isMine(listing)) {
         return StatusPage(

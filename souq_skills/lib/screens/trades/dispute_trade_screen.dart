@@ -20,13 +20,23 @@ class DisputeTradeScreen extends StatelessWidget {
         intro: 'Tell us what went wrong. The trade is on hold during review.',
         reasons: AppOptions.tradeIssueReasons,
         submitLabel: 'Submit dispute',
-        onSubmit: (reason) {
-          final report = SafetyService().disputeTrade(
-            tradeId: tradeId,
-            reason: reason,
-          );
-          context.replaceWith(AppRoutes.disputeCaseDetails, args: report.id);
-          context.showMessage('Report received');
+        askDetails: true,
+        // Sent online first; the trade is put on hold only once it is saved.
+        onSend: (reason, details) async {
+          final String caseId;
+          try {
+            caseId = (await SafetyService().submitTradeDispute(
+              tradeId: tradeId,
+              reason: reason,
+              details: details,
+            )).id;
+          } on ReportException catch (error) {
+            if (context.mounted) context.showMessage(error.message);
+            return;
+          }
+          if (!context.mounted) return;
+          context.replaceWith(AppRoutes.disputeCaseDetails, args: caseId);
+          context.showMessage('Dispute received');
         },
       ),
     ],

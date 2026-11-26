@@ -24,6 +24,8 @@ class ListingDetailsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LiveEntity<SkillListing>(
     find: () => ListingService().byId(listingId),
+    loadStatus: () => ListingService().loadStatus,
+    alsoListenTo: [ListingService.loadState],
     builder: (context, listing) {
       final isMine = ListingService().isMine(listing);
       // Nothing that would reach a blocked member is offered.

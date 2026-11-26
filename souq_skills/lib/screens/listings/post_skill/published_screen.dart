@@ -18,6 +18,8 @@ class PublishedScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LiveEntity<SkillListing>(
     find: () => ListingService().byId(listingId),
+    loadStatus: () => ListingService().loadStatus,
+    alsoListenTo: [ListingService.loadState],
     builder: (context, listing) => AppPage(
       title: 'Published',
       showBackButton: false,

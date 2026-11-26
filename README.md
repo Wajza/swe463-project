@@ -25,13 +25,13 @@ Souq Skills is a Flutter marketplace where members in Saudi Arabia trade skills 
 | 4 | **Earn and use skill credits through a wallet:** 120 welcome credits, +10 for each completed trade, +15 for each completed group trade; credits can be offered in a proposal, are held while the trade is active, and move to the other member when it completes | Firestore `wallets` |
 | 5 | **Propose trades through in-app chat:** real-time direct chat between members, with proposals shown as cards in the chat | Firestore `conversations`, `trades`, `proposals` |
 | 6 | **Negotiate trades with counteroffers and confirm agreements:** accept, counter or decline a proposal; the sender can cancel; an accepted proposal becomes an active trade with the agreed terms | Firestore `trades`, `proposals` |
+| 7 | **Levels and badges:** XP and a level with a title, shown on the profile with progress to the next level and a breakdown of how XP was earned (see *XP and levels*); six badges worked out from activity, including online group trades | Worked out from Firestore `trades`, `groupTrades`, `reviews` and `listings`; nothing extra is stored |
 
 ### Essential features: partially implemented
 
 | Feature | What works | What is missing |
 |---|---|---|
 | **Confirm completed trades and rate participants** | Scheduling a session; completion only after **both** members confirm, with the wallets settled in the same step; a star rating with feedback tags, saved online | Ratings are not checked against a completed trade, a member can be rated only once, and only one participant of a group trade can be rated (see *Known issues*) |
-| **Levels and badges** | Six badges worked out from activity, shown on the profile and the Badges screen | **XP and levels are not implemented.** The *Community Builder* badge does not count online group trades |
 
 ### Other areas
 
@@ -41,7 +41,7 @@ Souq Skills is a Flutter marketplace where members in Saudi Arabia trade skills 
 | Discover | Saved skills kept per member |
 | Posting | Group trades from the same page of selections |
 | Trading | Offering a skill or wallet credits, scheduling and rescheduling a session, completion, disputes |
-| Profile | Rating, badges earned from activity, reviews given and received, skills |
+| Profile | Level and XP progress, rating, badges earned from activity, reviews given and received, skills |
 | Group trades | Invite only: create, invite by username, accept or decline, group chat, completion once every member confirms, rating |
 | Chat | Direct and group chats with one-tap replies |
 | Wallet | Balance, credits on hold for active trades, hide or show, earned and spent totals, transaction history with details |
@@ -109,6 +109,10 @@ firebase deploy --only firestore:rules --project souq-skills
 
 To clear what is kept on one device, clear the browser's site data or the app's storage. Accounts, profiles, public profiles, usernames, listings, saved skills and blocks live in Firestore and are removed with **Delete account**; reports and ratings sent online are kept.
 
+## Final demonstration
+
+The run sheet for the final demonstration, with the order, accounts, suggested presenters and a pre-demo checklist, is in [DEMO.md](DEMO.md).
+
 ## Testing
 
 ### Automated
@@ -119,7 +123,7 @@ flutter analyze
 flutter test
 ```
 
-`flutter test` needs no Firebase connection. Without an initialized Firebase app, the app uses in-memory stand-ins for each Firebase repository (for example `DemoAuthRepository`, `DemoProfileRepository`, `DemoListingRepository`, `DemoTradeRepository`, `DemoWalletRepository`, `DemoChatRepository`), and the tests that cover Firestore behaviour inject them directly. On 14 Nov 2026, all 444 tests passed on the `phase-3` commit.
+`flutter test` needs no Firebase connection. Without an initialized Firebase app, the app uses in-memory stand-ins for each Firebase repository (for example `DemoAuthRepository`, `DemoProfileRepository`, `DemoListingRepository`, `DemoTradeRepository`, `DemoWalletRepository`, `DemoChatRepository`), and the tests that cover Firestore behaviour inject them directly. On 26 Nov 2026, all 457 tests passed.
 
 | Test file | Covers |
 |---|---|
@@ -285,7 +289,7 @@ Shared data is kept in Firebase, each part behind an interface in `lib/data/` wi
 
 Changes to these are saved online first and only then shown on the device. On failure the screen explains what happened, and nothing changes. The services translate between the member's Firebase uid and the app's local id for the current member (`'me'`) at this boundary. A different account signing in on the same device never sees the previous account's data.
 
-**Kept on the device only:** in-app notifications, app settings (such as dark mode), disputes opened from a trade, and everything about the built-in demo members (their trades, chats, group trades, reviews, blocks and reports). `AppDataSource` is implemented by `LocalDataSource` using `shared_preferences`, and every change is saved as a JSON snapshot.
+**Kept on the device only:** in-app notifications, app settings (such as dark mode), and everything about the built-in demo members (their trades, chats, group trades, reviews, blocks and reports). `AppDataSource` is implemented by `LocalDataSource` using `shared_preferences`, and every change is saved as a JSON snapshot.
 
 | State | Behaviour |
 |---|---|
@@ -296,12 +300,36 @@ Changes to these are saved online first and only then shown on the device. On fa
 | Failure to save | A banner on every screen with **Try again** |
 | Corrupt or outdated data | Falls back to the sample data |
 
+Screens that show online data use the load state of the service they read, so an empty list or a zero is never shown before the data has arrived:
+
+| Screen | Loading | Failure |
+|---|---|---|
+| Home, My listings, Saved skills, Blocked members | Spinner | Error card with **Try again** |
+| My Trades | "Loading your trades…" instead of the empty message | Error card with **Try again** |
+| Wallet | Spinner in the balance card instead of 0, and "Loading your wallet…" | Error card with **Try again**; the balance shows "—" |
+| Profile | "…" for Trades and Credits, "Loading your level…" | Error card with **Try again** for the level |
+| Trade, proposal, group, listing and case details opened directly (for example from a notification) | "Loading…" instead of *Page not found* | "Could not load this page" with **Try again** |
+| Offering credits in a proposal | "Loading your credits…" instead of "not enough credits" | **Try again** |
+
 **Reusable components.** All screens are built from `AppPage`, `SouqButton`, `SelectField`, `OptionSheet`, `ChoiceChipRow`, `SkillPostForm`, `ProposalForm`, `IssueForm` and `ConversationView`, among others.
 
 **Secrets.** The repository contains no secrets or service-account keys.
 
 - `lib/firebase_options.dart` holds the Firebase *client* configuration, including API keys. These identify the app to Firebase rather than grant access; access is controlled by the security rules.
 - `android/app/google-services.json` and other local files are excluded by `.gitignore`.
+
+### XP and levels
+
+XP is worked out by `ExperienceService` from records the backend already verifies, so it cannot be raised from the app and nothing extra needs storing or protecting:
+
+| Source | XP | Why it can be trusted |
+|---|---|---|
+| Completed trade | 100 each | Completed only once both members confirm, settled in Firestore together with the wallets |
+| Completed group trade | 150 each | Completed once every member confirms |
+| Rating received | 20 each | The rules allow one rating per member |
+| Published listing | 25 each, up to 5 | Capped so posting many listings cannot be used to farm XP |
+
+Every 250 XP is a new level. Titles: *Newcomer* (levels 1–2), *Skill Swapper* (3–5), *Trusted Trader* (6–9) and *Community Guide* (10 and above). The profile shows the level on the avatar and a progress card; tapping the card lists each source with the member's own counts. Until trades, group trades, listings and ratings have loaded, the card shows a spinner rather than a low level. Only the member's own level is shown, because other members' trades are private.
 
 ### Packages, their purpose and licenses
 
@@ -311,7 +339,7 @@ Changes to these are saved online first and only then shown on the device. On fa
 | `firebase_core` | 5.1.0 | Connecting to the Firebase project | BSD 3-Clause |
 | `firebase_auth` | 7.0.1 | Phone sign-in with SMS verification | BSD 3-Clause |
 | `cloud_firestore` | 7.1.0 | Profiles, public profiles, usernames, listings, saved skills, blocks, reports, reviews, chats, trades, proposals, group trades and wallets | BSD 3-Clause |
-| `shared_preferences` | 2.5.6 | On-device storage for notifications, app settings, disputes and the built-in demo members' data, saved as a JSON snapshot | BSD 3-Clause |
+| `shared_preferences` | 2.5.6 | On-device storage for notifications, app settings and the built-in demo members' data, saved as a JSON snapshot | BSD 3-Clause |
 | `geolocator` | 14.1.2 | Reading the device's location to fill in the nearest city | MIT |
 | `flutter_test` | SDK | Widget and unit tests (development only) | BSD 3-Clause |
 | `flutter_lints` | 6.0.0 | Static analysis rules (development only) | BSD 3-Clause |
@@ -322,20 +350,18 @@ Versions are those locked in `pubspec.lock` and `firestore_rules_test/package-lo
 
 ## Known issues and limitations
 
-- **XP and levels are not implemented.** They were postponed, together with notifications about matching listings, because they need product and backend decisions first.
-- **Community Builder does not count online group trades.** The badge counts only group trades kept on the device (`BadgeService` reads `Repository.groupTrades`), so completing a real online group trade does not earn it.
+- **Notifications about matching listings are not implemented.**
+- **Other members' levels are not shown,** because their trades are private to them.
 - **Ratings are not tied to a verified trade.** The rules do not check that the trade in `contextId` exists, is completed, or includes both members, so any signed-in member can rate any real member once. Server-side trade checks are still needed.
-- **One rating per member, not per trade.** Rating the same member after a second exchange is refused, so the trade screen may still offer *Rate* for that exchange; the rating screen then says *Already rated*.
+- **One rating per member, not per trade.** Rating the same member after a second exchange is refused, so the trade screen does not offer *Rate* for that exchange.
 - **Only one participant of a group trade can be rated:** the organizer, or for the organizer the first other member.
 - **Trade ids in reports are not checked.** A trade report or dispute stores the trade id, but the rules do not confirm that the trade exists or that the reporter took part.
-- **Disputes still stay on the device.** The *Open a dispute* screen calls the device-only `SafetyService.disputeTrade`. `SafetyService.submitTradeDispute` sends the dispute online first and only then marks the trade as disputed; the dispute screen needs to switch to it, awaiting it and showing its errors, before disputes are shared online.
 - **The built-in demo members are simulated** on the device; real members are never simulated. `MemberSimulator` accepts proposals after about 30 seconds, and within about 2 seconds replies in chat, accepts group invitations and returns a 5-star rating.
 - **Other members' ratings are loaded once per account;** new ratings of others show after the app is restarted, while the member's own show when the Ratings screen opens.
 - A member whose public profile is not published yet (an older account before it next signs in) is shown as "Member".
 - **Listings refresh when Home opens and when pulled down,** not live, and all listings are loaded at once; search and filters run on the device.
 - **Device location picks the nearest listed city,** even if the member is outside Saudi Arabia.
 - **Notifications are local in-app notifications only.** They are generated while the app is open; background and push notifications are not supported.
-- **My Trades and Wallet have no online loading or error states.** `OnlineTrades.loadError` and `OnlineWallet.loadError` are recorded but not shown on these screens, and the online wallet balance shows 0 until it has loaded.
 - **Other members' public profiles are fetched once and then kept on the device;** changes they make show after the app is restarted on a new account or the copy is refreshed.
 - **Blocking is one-way and silent.** A blocked member is not told, and still sees the listings of the member who blocked them. Blocking hides their listings on Home and in Saved skills, and on their listing and profile it offers only Unblock. Direct chats are checked on the server: neither member can message the other while either has blocked them, and the sender is only told the message could not be sent.
 - **Android needs extra Firebase configuration** that is not in the repository (see *Firebase setup*).
@@ -354,7 +380,8 @@ Drawn from the repository's commit history.
 | 9 Nov 2026 | Screens and services added on `main`; front end rebuilt with working flows and a single design; selection-first redesign with an on-device data source |
 | 10–11 Nov 2026 | Firebase project configured; phone authentication, profiles and skills, unique usernames, listings, public profiles, blocking, reports and ratings in Firestore, with security rules (pull request #2) |
 | 11–13 Nov 2026 | Real-time chat, trades and proposals, wallet and credits, online group trades and in-app notifications in Firebase |
-| 14 Nov 2026 | Frontend features from `phase3/frontend` integrated (pull request #3); the `phase-3` tag points to this commit |
+| 14 Nov 2026 | Frontend features from `phase3/frontend` integrated (pull request #3) |
+| 26 Nov 2026 | Feedback fixes: loading and error states for My Trades, Wallet, the profile and screens opened directly; XP and levels; disputes sent online; Community Builder counts online group trades; *Rate* offered only when a rating can be saved |
 
 ## Contribution record
 

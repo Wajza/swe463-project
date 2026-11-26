@@ -3,6 +3,7 @@ import 'package:souq_skills/core/app_routes.dart';
 import 'package:souq_skills/core/navigation.dart';
 import 'package:souq_skills/models/trade_proposal.dart';
 import 'package:souq_skills/screens/shared/live_entity.dart';
+import 'package:souq_skills/services/trade_service.dart';
 import 'package:souq_skills/services/member_service.dart';
 import 'package:souq_skills/services/proposal_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
@@ -78,6 +79,7 @@ class ProposalDetailsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LiveEntity<TradeProposal>(
     find: () => ProposalService().byId(proposalId),
+    loadStatus: () => TradeService().loadStatus,
     builder: (context, proposal) {
       final sender = MemberService().nameOf(proposal.senderId);
       final isIncoming = ProposalService().isIncoming(proposal);

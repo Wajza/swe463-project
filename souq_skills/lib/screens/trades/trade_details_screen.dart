@@ -69,7 +69,7 @@ class TradeDetailsScreen extends StatelessWidget {
       icon: Icons.task_alt,
       onPressed: () => _complete(context, trade),
     ),
-    TradeStatus.completed when !ReviewService().hasRated(tradeId) => SouqButton(
+    TradeStatus.completed when ReviewService().canRate(tradeId) => SouqButton(
       label: 'Rate this experience',
       icon: Icons.star_outline,
       onPressed: () => context.open(AppRoutes.rateTrade, args: tradeId),
@@ -146,6 +146,7 @@ class TradeDetailsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LiveEntity<Trade>(
     find: () => TradeService().byId(tradeId),
+    loadStatus: () => TradeService().loadStatus,
     builder: (context, trade) {
       final session = TradeSessionService().byId(trade.sessionId);
       final myReview = ReviewService().givenFor(tradeId);

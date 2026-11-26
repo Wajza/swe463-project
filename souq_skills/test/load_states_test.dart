@@ -1,14 +1,9 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:souq_skills/data/auth_repository.dart';
 import 'package:souq_skills/data/chat_repository.dart';
 import 'package:souq_skills/data/device_account_store.dart';
 import 'package:souq_skills/data/profile_repository.dart';
-import 'package:souq_skills/data/trade_repository.dart';
 import 'package:souq_skills/data/wallet_repository.dart';
-import 'package:souq_skills/models/trade_proposal.dart';
 import 'package:souq_skills/models/user.dart';
 import 'package:souq_skills/screens/trades/my_trades_screen.dart';
 import 'package:souq_skills/screens/wallet/wallet_screen.dart';
@@ -20,55 +15,22 @@ import 'package:souq_skills/services/repository.dart';
 import 'package:souq_skills/services/trade_service.dart';
 import 'package:souq_skills/services/wallet_service.dart';
 
+import 'support/controlled_repositories.dart';
 import 'support/memory_data_source.dart';
 
-const _maha = 'uid-maha';
-
-/// A wallet whose live streams the test controls, so it can stay loading
-/// or fail on demand.
-class _ControlledWallets extends DemoWalletRepository {
-  var balance = StreamController<int?>.broadcast();
-  var entries = StreamController<List<WalletEntry>>.broadcast();
-
-  @override
-  Stream<int?> watchBalance(String uid) => balance.stream;
-
-  @override
-  Stream<List<WalletEntry>> watchEntries(String uid) => entries.stream;
-}
-
-/// Trades whose live streams the test controls.
-class _ControlledTrades extends DemoTradeRepository {
-  _ControlledTrades(_ControlledWallets wallets) : super(wallets: wallets);
-
-  var trades = StreamController<List<OnlineTrade>>.broadcast();
-  final proposals = StreamController<List<TradeProposal>>.broadcast();
-
-  @override
-  Stream<List<OnlineTrade>> watchTrades(String uid) => trades.stream;
-
-  @override
-  Stream<List<TradeProposal>> watchProposals(String uid) => proposals.stream;
-}
-
-class _Auth extends DemoAuthRepository {
-  _Auth() : super(isKnownPhone: AuthService().isKnownPhone);
-
-  @override
-  String? get uid => _maha;
-}
+const _maha = onlineTestUid;
 
 void main() {
   final repository = Repository.instance;
   final originalAuth = AuthService.repository;
-  late _ControlledWallets wallets;
-  late _ControlledTrades trades;
+  late ControlledWallets wallets;
+  late ControlledTrades trades;
 
   setUp(() async {
     repository
       ..dataSource = MemoryDataSource()
       ..reset();
-    AuthService.repository = _Auth();
+    AuthService.repository = OnlineTestAuth();
     AuthService.deviceAccount = MemoryDeviceAccountStore(_maha);
     final profiles = DemoProfileRepository();
     await profiles.saveProfile(
@@ -85,8 +47,8 @@ void main() {
     );
     AuthService.profiles = profiles;
     ChatService.repository = DemoChatRepository();
-    wallets = _ControlledWallets();
-    trades = _ControlledTrades(wallets);
+    wallets = ControlledWallets();
+    trades = ControlledTrades(wallets);
     OnlineTrades.repository = trades;
     AuthService().signIn();
     await Future<void>.delayed(Duration.zero);

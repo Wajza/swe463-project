@@ -1,3 +1,4 @@
+import 'package:souq_skills/models/load_status.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:souq_skills/data/listing_repository.dart';
@@ -91,6 +92,17 @@ class ListingService {
   bool get hasCurrentListings =>
       !isOnline ||
       (_loadedFor != null && _loadedFor == AuthService.repository.uid);
+
+  /// Where shared listings come from, for screens showing one.
+  LoadStatus get loadStatus {
+    if (hasCurrentListings) return LoadStatus.ready;
+    final state = loadState.value;
+    return LoadStatus(
+      isLoading: !state.isFailed,
+      error: state.isFailed ? state.error : null,
+      onRetry: refresh,
+    );
+  }
 
   /// Replaces the listings on this device with the shared ones, as seen by
   /// the signed-in member. Does nothing offline. Never throws: the outcome

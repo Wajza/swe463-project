@@ -4,6 +4,7 @@ import 'package:souq_skills/models/achievement_badge.dart';
 import 'package:souq_skills/models/notification.dart';
 import 'package:souq_skills/models/user.dart';
 
+import 'group_trade_service.dart';
 import 'notification_service.dart';
 import 'repository.dart';
 import 'trade_service.dart';
@@ -23,8 +24,9 @@ class BadgeService {
     final listings = _repo.listings
         .where((listing) => listing.ownerId == User.currentUserId)
         .length;
-    final groups = _repo.groupTrades
-        .where((group) => group.memberIds.contains(User.currentUserId))
+    final groups = GroupTradeService()
+        .all()
+        .where(GroupTradeService().isMember)
         .length;
 
     return [

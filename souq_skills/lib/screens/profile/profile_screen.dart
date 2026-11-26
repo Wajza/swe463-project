@@ -4,12 +4,15 @@ import 'package:souq_skills/core/formatters.dart';
 import 'package:souq_skills/core/navigation.dart';
 import 'package:souq_skills/models/user.dart';
 import 'package:souq_skills/services/badge_service.dart';
+import 'package:souq_skills/services/experience_service.dart';
+import 'package:souq_skills/services/listing_service.dart';
 import 'package:souq_skills/services/profile_service.dart';
 import 'package:souq_skills/services/review_service.dart';
 import 'package:souq_skills/services/trade_service.dart';
 import 'package:souq_skills/services/wallet_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
 import 'package:souq_skills/widgets/badge_strip.dart';
+import 'package:souq_skills/widgets/experience_card.dart';
 import 'package:souq_skills/widgets/live_view.dart';
 import 'package:souq_skills/widgets/profile_header.dart';
 import 'package:souq_skills/widgets/rating_summary.dart';
@@ -34,12 +37,18 @@ class ProfileScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => LiveView(
+    alsoListenTo: [ListingService.loadState, ReviewService.loadStates],
     builder: (context) {
       final reviews = ReviewService();
       final badges = BadgeService().badges();
       final earned = badges.where((badge) => badge.isEarned).length;
       final latest = reviews.latestForCurrentUser(limit: 3);
       final user = ProfileService().currentUser;
+      final experience = ExperienceService();
+      final status = experience.loadStatus;
+      final level = status.isLoading || status.error != null
+          ? null
+          : experience.current().level;
       return AppPage(
         title: 'Profile',
         actions: [
@@ -50,8 +59,10 @@ class ProfileScreen extends StatelessWidget {
           ),
         ],
         children: [
-          ProfileHeader(user: user),
+          ProfileHeader(user: user, level: level),
           const SizedBox(height: 16),
+          const ExperienceCard(),
+          const SizedBox(height: 4),
           Row(
             spacing: 10,
             children: [

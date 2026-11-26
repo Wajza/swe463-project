@@ -41,6 +41,8 @@ class _ListingReviewsScreenState extends State<ListingReviewsScreen> {
   @override
   Widget build(BuildContext context) => LiveEntity<SkillListing>(
     find: () => ListingService().byId(widget.listingId),
+    loadStatus: () => ListingService().loadStatus,
+    alsoListenTo: [ListingService.loadState],
     builder: (context, listing) => ValueListenableBuilder(
       valueListenable: ReviewService.loadStates,
       builder: (context, _, _) {

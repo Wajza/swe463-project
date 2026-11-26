@@ -43,6 +43,8 @@ class ShareListingScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LiveEntity<SkillListing>(
     find: () => ListingService().byId(listingId),
+    loadStatus: () => ListingService().loadStatus,
+    alsoListenTo: [ListingService.loadState],
     builder: (context, listing) {
       final direct = ChatService().conversations().where(
         (item) => !item.isGroup,

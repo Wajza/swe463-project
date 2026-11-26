@@ -16,6 +16,7 @@ class GroupTradeChatScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LiveEntity<GroupTrade>(
     find: () => GroupTradeService().byId(groupId),
+    loadStatus: () => GroupTradeService().loadStatus,
     builder: (context, group) => AppPage(
       title: group.title,
       actions: [

@@ -121,7 +121,7 @@ class _GroupTradeDetailsScreenState extends State<GroupTradeDetailsScreen> {
       );
     }
     if (!service.isMember(group)) return null;
-    if (group.isCompleted && !ReviewService().hasRated(groupId)) {
+    if (group.isCompleted && ReviewService().canRate(groupId)) {
       return SouqButton(
         label: 'Rate this experience',
         icon: Icons.star_outline,
@@ -189,6 +189,7 @@ class _GroupTradeDetailsScreenState extends State<GroupTradeDetailsScreen> {
   @override
   Widget build(BuildContext context) => LiveEntity<GroupTrade>(
     find: () => GroupTradeService().byId(groupId),
+    loadStatus: () => GroupTradeService().loadStatus,
     builder: (context, group) {
       final service = GroupTradeService();
       final menu = _menu(group);

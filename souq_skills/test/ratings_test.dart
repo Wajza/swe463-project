@@ -107,10 +107,14 @@ User _user(String first, String last, String username, String phone) => User(
 Widget _app(Widget screen) =>
     MaterialApp(home: screen, onGenerateRoute: AppRouter.onGenerateRoute);
 
-ReviewDraft _draftAbout(String subject, {int rating = 5}) => ReviewDraft(
+ReviewDraft _draftAbout(
+  String subject, {
+  int rating = 5,
+  String contextId = 't-elsewhere',
+}) => ReviewDraft(
   subjectId: subject,
   rating: rating,
-  contextId: 't-elsewhere',
+  contextId: contextId,
   contextKind: ReviewContextKind.trade,
 );
 
@@ -207,7 +211,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Rating saved to your profile'), findsOneWidget);
-      final stored = reviews.storedData('uid-maha_uid-sami')!;
+      final stored = reviews.storedData('uid-maha_t-real-sami_uid-sami')!;
       expect(stored['reviewerId'], _maha);
       expect(stored['subjectId'], _sami);
       expect(stored['rating'], 4);
@@ -334,12 +338,15 @@ void main() {
         ReviewService().submitRating(requestFor(_samiTrade), 5, const ['Rude']),
         throwsA(same(ReviewException.invalidTags)),
       );
-      expect(reviews.storedData('uid-maha_uid-sami'), isNull);
+      expect(reviews.storedData('uid-maha_t-real-sami_uid-sami'), isNull);
       expect(ReviewService().hasRated(_samiTrade), isFalse);
     });
 
     test('a rating given on another device is refused and loaded', () async {
-      await reviews.createReview(_maha, _draftAbout(_sami, rating: 3));
+      await reviews.createReview(
+        _maha,
+        _draftAbout(_sami, rating: 3, contextId: _samiTrade),
+      );
 
       await expectLater(
         ReviewService().submitRating(requestFor(_samiTrade), 5, const []),
@@ -378,7 +385,7 @@ void main() {
         await rating;
 
         // Saved as Maha's, online only.
-        expect(reviews.storedData('uid-maha_uid-sami'), isNotNull);
+        expect(reviews.storedData('uid-maha_t-real-sami_uid-sami'), isNotNull);
         expect(_onlineReviews(), isEmpty);
         expect(ReviewService().hasRated(_samiTrade), isFalse);
       },
@@ -585,10 +592,12 @@ void main() {
       );
       // Lina's rating is not on this device, but is kept online.
       expect(
-        repository.reviews.where((r) => r.id == 'uid-lina_uid-sami'),
+        repository.reviews.where(
+          (r) => r.id == 'uid-lina_t-elsewhere_uid-sami',
+        ),
         isEmpty,
       );
-      expect(reviews.storedData('uid-lina_uid-sami'), isNotNull);
+      expect(reviews.storedData('uid-lina_t-elsewhere_uid-sami'), isNotNull);
 
       hidden.remove(_sami);
       await ReviewService().refreshReviews([_sami], refresh: true);

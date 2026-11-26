@@ -12,7 +12,9 @@ class ReviewException implements Exception {
   static const cannotRateYourself = ReviewException(
     'You cannot rate yourself.',
   );
-  static const duplicate = ReviewException('You already rated this member.');
+  static const duplicate = ReviewException(
+    'You already rated this member for this exchange.',
+  );
   static const invalidRating = ReviewException('Choose from 1 to 5 stars.');
   static const invalidTags = ReviewException(
     'Choose up to ${ReviewDocument.maxTags} of the feedback options.',
@@ -41,8 +43,8 @@ class ReviewDraft {
   final int rating;
   final List<String> tags;
 
-  /// The trade or group on the reviewer's device. Trades are not shared
-  /// online yet, so this proves nothing about the trade.
+  /// The id of the trade or group trade being rated. Each member can rate
+  /// each other member once per exchange.
   final String contextId;
   final ReviewContextKind contextKind;
   final String skillTitle;
@@ -51,9 +53,15 @@ class ReviewDraft {
 /// Ratings members give each other, kept at the top-level
 /// `reviews/{reviewId}` by uid only, with no names or other profile data.
 ///
-/// For now each member rates another member once: the id is
-/// `{reviewerUid}_{subjectUid}`. Once trades are shared online this can
-/// become once per completed trade, checked by the server.
+/// Each member rates another member once per exchange: the id is
+/// `{reviewerUid}_{contextId}_{subjectUid}`, so the same member can be
+/// rated again for another trade, and each member of a group trade can be
+/// rated for that group.
+///
+/// Reviews from before this have the id `{reviewerUid}_{subjectUid}`. They
+/// are read and counted as they are, never moved, and still count as the
+/// rating of their own exchange (their stored `contextId`), so that
+/// exchange is never rated twice.
 ///
 /// A member's received reviews can be read by them and by each reviewer;
 /// by others only while the member's public profile is switched on. Nobody
@@ -82,13 +90,33 @@ abstract final class ReviewDocument {
 
   static final _safeId = RegExp(r'^[A-Za-z0-9_-]{1,128}$');
 
-  /// The fixed id of [reviewerUid]'s review of [subjectUid].
-  static String reviewIdFor(String reviewerUid, String subjectUid) {
+  /// The fixed id of [reviewerUid]'s review of [subjectUid] for the
+  /// exchange [contextId].
+  static String reviewIdFor(
+    String reviewerUid,
+    String contextId,
+    String subjectUid,
+  ) {
     if (!_safeId.hasMatch(reviewerUid) || !_safeId.hasMatch(subjectUid)) {
       throw const ReviewException('This member cannot be rated.');
     }
-    return '${reviewerUid}_$subjectUid';
+    if (!_safeId.hasMatch(contextId)) {
+      throw const ReviewException('This exchange cannot be rated.');
+    }
+    return '${reviewerUid}_${contextId}_$subjectUid';
   }
+
+  /// Whether stored [data] is [reviewerUid]'s review of [subjectUid] for
+  /// [contextId], whatever its id: legacy reviews count too.
+  static bool isReviewOf(
+    Map<String, dynamic> data, {
+    required String reviewerUid,
+    required String subjectUid,
+    required String contextId,
+  }) =>
+      data['reviewerId'] == reviewerUid &&
+      data['subjectId'] == subjectUid &&
+      data['contextId'] == contextId;
 
   /// Checks [draft] by [uid] before anything is sent.
   static void validate(String uid, ReviewDraft draft) {
@@ -104,10 +132,7 @@ abstract final class ReviewDocument {
         !tags.every(AppOptions.ratingTags.contains)) {
       throw ReviewException.invalidTags;
     }
-    if (!_safeId.hasMatch(draft.contextId)) {
-      throw const ReviewException('This exchange cannot be rated.');
-    }
-    reviewIdFor(uid, draft.subjectId);
+    reviewIdFor(uid, draft.contextId, draft.subjectId);
   }
 
   /// The fields stored for [draft] by [uid]; `createdAt` is added by the
@@ -185,15 +210,22 @@ class FirebaseReviewRepository implements ReviewRepository {
   @override
   Future<Review> createReview(String uid, ReviewDraft draft) async {
     ReviewDocument.validate(uid, draft);
-    final id = ReviewDocument.reviewIdFor(uid, draft.subjectId);
+    final id = ReviewDocument.reviewIdFor(
+      uid,
+      draft.contextId,
+      draft.subjectId,
+    );
     final data = ReviewDocument.toData(uid, draft);
     return _guard(() async {
       // Among the reviewer's own reviews, by field: a lookup by id would
       // read the document itself, which the rules allow only once it
-      // exists. The rules also refuse a second review with the same id.
+      // exists, and would miss a legacy review of the same exchange, which
+      // has another id. The rules also refuse a second review with the
+      // same id.
       final existing = await _reviews
           .where('reviewerId', isEqualTo: uid)
           .where('subjectId', isEqualTo: draft.subjectId)
+          .where('contextId', isEqualTo: draft.contextId)
           .limit(1)
           .get();
       if (existing.docs.isNotEmpty) throw ReviewException.duplicate;
@@ -267,12 +299,19 @@ class FirebaseReviewRepository implements ReviewRepository {
 /// Firebase has not been set up, such as in tests.
 class DemoReviewRepository implements ReviewRepository {
   /// [isPublic] says whether a member's public profile is switched on, as
-  /// the rules check it.
-  DemoReviewRepository({bool Function(String uid)? isPublic})
-    : _isPublic = isPublic ?? ((_) => true);
+  /// the rules check it. [documents] are stored data by review id, as
+  /// Firestore would hold it, e.g. to stand in for legacy reviews.
+  DemoReviewRepository({
+    bool Function(String uid)? isPublic,
+    Map<String, Map<String, dynamic>>? documents,
+  }) : _isPublic = isPublic ?? ((_) => true),
+       _reviews = {
+         for (final MapEntry(:key, :value) in (documents ?? {}).entries)
+           key: {...value},
+       };
 
   final bool Function(String uid) _isPublic;
-  final Map<String, Map<String, dynamic>> _reviews = {};
+  final Map<String, Map<String, dynamic>> _reviews;
   DateTime _lastCreated = DateTime(2000);
 
   /// A copy of what is stored for review [id], or null.
@@ -284,8 +323,22 @@ class DemoReviewRepository implements ReviewRepository {
   @override
   Future<Review> createReview(String uid, ReviewDraft draft) async {
     ReviewDocument.validate(uid, draft);
-    final id = ReviewDocument.reviewIdFor(uid, draft.subjectId);
-    if (_reviews.containsKey(id)) throw ReviewException.duplicate;
+    final id = ReviewDocument.reviewIdFor(
+      uid,
+      draft.contextId,
+      draft.subjectId,
+    );
+    // As in Firestore: by field, so a legacy review of the same exchange
+    // counts, and by id, which the rules refuse to write over.
+    final rated = _reviews.values.any(
+      (data) => ReviewDocument.isReviewOf(
+        data,
+        reviewerUid: uid,
+        subjectUid: draft.subjectId,
+        contextId: draft.contextId,
+      ),
+    );
+    if (rated || _reviews.containsKey(id)) throw ReviewException.duplicate;
     final now = DateTime.now();
     _lastCreated = now.isAfter(_lastCreated)
         ? now

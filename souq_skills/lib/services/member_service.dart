@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:souq_skills/models/user.dart';
 
 import 'auth_service.dart';
@@ -27,26 +28,55 @@ class MemberService {
   /// Members whose public profiles are being fetched right now.
   static final Set<String> _fetching = {};
 
-  /// Fetches the public profiles of [ids] that are not known yet and keeps
-  /// them with the other members, so [byId] and [nameOf] find them. With
-  /// [refresh], known members are fetched again too.
+  /// Members whose public profile was fetched, or tried, in this app
+  /// session for the signed-in account [_checkedFor]. Kept in memory only,
+  /// so copies kept on this device from an earlier session are checked
+  /// again once, and a page refresh shows members' latest names.
+  static final Set<String> _checked = {};
+  static String? _checkedFor;
+
+  /// Forgets which members were checked, as a new app session would.
+  @visibleForTesting
+  static void forgetChecked() {
+    _checked.clear();
+    _checkedFor = null;
+  }
+
+  /// Fetches the public profiles of [ids] and keeps them with the other
+  /// members, so [byId] and [nameOf] find them: members not known yet, and
+  /// known ones not checked yet in this app session, whose copy on this
+  /// device may be out of date. Known members are shown at once from that
+  /// copy until the new one arrives. With [refresh], every member is
+  /// fetched again.
   ///
   /// Never the current member: neither the local id nor the signed-in uid
   /// is ever stored as another member. Members already being fetched are
-  /// not fetched twice. Offline it does nothing. Never throws: a member
-  /// that could not be fetched is simply tried again next time.
+  /// not fetched twice. Offline it does nothing. Never throws: a member not
+  /// known yet who could not be fetched is simply tried again next time; a
+  /// known one keeps their copy until the next session.
   Future<void> loadMembers(Iterable<String> ids, {bool refresh = false}) async {
     final profiles = AuthService.profiles;
     if (profiles == null) return;
     final uid = AuthService.repository.uid;
+    // Checks made for another account never count for this one.
+    if (_checkedFor != uid) {
+      _checked.clear();
+      _checkedFor = uid;
+    }
     final wanted = {
       for (final id in ids)
         if (id.isNotEmpty &&
             id != User.currentUserId &&
             id != uid &&
             !_fetching.contains(id) &&
-            (refresh || _repo.find(_repo.members, id) == null))
+            (refresh ||
+                _repo.find(_repo.members, id) == null ||
+                !_checked.contains(id)))
           id,
+    };
+    final known = {
+      for (final id in wanted)
+        if (_repo.find(_repo.members, id) != null) id,
     };
     // The signed-in account may have been kept as another member while
     // someone else was signed in on this device; now it is 'me' instead.
@@ -66,6 +96,13 @@ class MemberService {
     }
     // Fetched for an account that has since signed out or switched.
     if (uid != AuthService.repository.uid) return;
+    // Checked for this session: those found, and known ones even if not
+    // (failed, or no longer published), which keep their copy rather than
+    // being asked for again and again. Unknown ones are tried again.
+    _checked.addAll({
+      for (final id in wanted)
+        if (found.containsKey(id) || known.contains(id)) id,
+    });
     _repo.members
       ..removeWhere((member) => member.id == uid)
       ..removeWhere((member) => found.containsKey(member.id))

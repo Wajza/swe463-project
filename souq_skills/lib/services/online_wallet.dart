@@ -25,6 +25,7 @@ class OnlineWallet {
   static StreamSubscription<int?>? _balanceWatch;
   static StreamSubscription<List<WalletEntry>>? _entriesWatch;
   static int? _balance;
+  static bool _entriesLoaded = false;
   static List<WalletEntry> _entries = const [];
   static String? _loadError;
 
@@ -46,8 +47,22 @@ class OnlineWallet {
         identical(repository, _listeningTo);
   }
 
-  /// The online balance; 0 until it has loaded.
+  /// The online balance; 0 until it has loaded, so check [isLoaded] before
+  /// showing it.
   static int get balance => _balance ?? 0;
+
+  /// Whether both the balance and the history have arrived.
+  static bool get isLoaded => isActive && _balance != null && _entriesLoaded;
+
+  /// Whether the wallet is still on its way: neither arrived nor failed.
+  static bool get isLoading => isActive && !isLoaded && _loadError == null;
+
+  /// Loads the wallet again after a failure.
+  static void retry() {
+    _stopListening();
+    syncSession();
+    Repository.instance.emitChange();
+  }
 
   /// What went wrong loading the wallet, until it loads again.
   static String? get loadError => _loadError;
@@ -86,6 +101,7 @@ class OnlineWallet {
     _listeningFor = null;
     _listeningTo = null;
     _balance = null;
+    _entriesLoaded = false;
     _entries = const [];
     _loadError = null;
   }
@@ -155,6 +171,7 @@ class OnlineWallet {
   static void _onEntries(String uid, List<WalletEntry> items) {
     if (!_isCurrent(uid)) return;
     _entries = List.unmodifiable(items);
+    _entriesLoaded = true;
     _loadError = null;
     unawaited(
       MemberService().loadMembers({

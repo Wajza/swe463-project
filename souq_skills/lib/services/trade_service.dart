@@ -26,6 +26,19 @@ class TradeService {
 
   List<Trade> all() => [...OnlineTrades.trades(), ..._repo.trades.reversed];
 
+  /// Whether online trades are still loading, so an empty list or a count
+  /// of 0 is not final yet.
+  bool get isLoading => OnlineTrades.isLoading;
+
+  /// What went wrong loading online trades, if anything.
+  String? get loadError => OnlineTrades.loadError;
+
+  /// Whether every trade has arrived, so counts are final.
+  bool get isLoaded => !OnlineTrades.isAvailable || OnlineTrades.isLoaded;
+
+  /// Loads online trades again after a failure.
+  void retry() => OnlineTrades.retry();
+
   int completedCount() => all().where((trade) => trade.isComplete).length;
 
   /// The current user confirms the exchange happened; returns whether the

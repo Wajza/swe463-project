@@ -51,17 +51,31 @@ class OnlineTrades {
   /// What went wrong loading trades, until they load again.
   static String? get loadError => _loadError;
 
-  /// Starts listening to the signed-in account's trades, or stops when
-  /// nobody is signed in, offline, or the account changed.
-  static void syncSession() {
-    final online = repository;
+  static String? _wantedUid() {
     final uid = AuthService.repository.uid;
-    final wanted =
-        online != null &&
+    return repository != null &&
             Repository.instance.isSignedIn &&
             TradeDocument.isSafeId(uid)
         ? uid
         : null;
+  }
+
+  /// Whether the signed-in account's trades are kept online.
+  static bool get isAvailable => _wantedUid() != null;
+
+  /// Whether the signed-in account's online trades have arrived.
+  static bool get isLoaded =>
+      _tradesLoaded && _listeningFor != null && _listeningFor == _wantedUid();
+
+  /// Whether online trades are still on their way: neither arrived nor
+  /// failed, so an empty list must not be read as "no trades".
+  static bool get isLoading => isAvailable && !isLoaded && _loadError == null;
+
+  /// Starts listening to the signed-in account's trades, or stops when
+  /// nobody is signed in, offline, or the account changed.
+  static void syncSession() {
+    final online = repository;
+    final wanted = _wantedUid();
     if (wanted == _listeningFor) return;
     _stopListening();
     if (wanted == null || online == null) return;
@@ -78,6 +92,13 @@ class OnlineTrades {
           (items) => _onProposals(wanted, items),
           onError: (Object error) => _onFailed(wanted, error),
         );
+  }
+
+  /// Loads the trades again after a failure.
+  static void retry() {
+    _stopListening();
+    syncSession();
+    Repository.instance.emitChange();
   }
 
   static void _stopListening() {

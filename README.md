@@ -303,18 +303,22 @@ Changes to these are saved online first and only then shown on the device. On fa
 - `lib/firebase_options.dart` holds the Firebase *client* configuration, including API keys. These identify the app to Firebase rather than grant access; access is controlled by the security rules.
 - `android/app/google-services.json` and other local files are excluded by `.gitignore`.
 
-### Packages and their purpose
+### Packages, their purpose and licenses
 
-| Package | Purpose |
-|---|---|
-| `flutter` | Framework and navigation |
-| `firebase_core` | Connecting to the Firebase project |
-| `firebase_auth` | Phone sign-in with SMS verification |
-| `cloud_firestore` | Profiles, public profiles, usernames, listings, saved skills, blocks, reports, reviews, chats, trades, proposals, group trades and wallets |
-| `shared_preferences` | On-device storage for notifications, app settings, disputes and the built-in demo members' data, saved as a JSON snapshot |
-| `geolocator` | Reading the device's location to fill in the nearest city |
-| `flutter_test`, `flutter_lints` | Tests and static analysis (development only) |
-| `@firebase/rules-unit-testing`, `firebase` (npm, in `firestore_rules_test/`) | Firestore rules tests against the emulator (development only) |
+| Package | Version | Purpose | License |
+|---|---|---|---|
+| `flutter` | SDK | Framework and navigation | BSD 3-Clause |
+| `firebase_core` | 5.1.0 | Connecting to the Firebase project | BSD 3-Clause |
+| `firebase_auth` | 7.0.1 | Phone sign-in with SMS verification | BSD 3-Clause |
+| `cloud_firestore` | 7.1.0 | Profiles, public profiles, usernames, listings, saved skills, blocks, reports, reviews, chats, trades, proposals, group trades and wallets | BSD 3-Clause |
+| `shared_preferences` | 2.5.6 | On-device storage for notifications, app settings, disputes and the built-in demo members' data, saved as a JSON snapshot | BSD 3-Clause |
+| `geolocator` | 14.1.2 | Reading the device's location to fill in the nearest city | MIT |
+| `flutter_test` | SDK | Widget and unit tests (development only) | BSD 3-Clause |
+| `flutter_lints` | 6.0.0 | Static analysis rules (development only) | BSD 3-Clause |
+| `@firebase/rules-unit-testing` (npm) | 6.0.0 | Firestore rules tests against the emulator, in `firestore_rules_test/` (development only) | Apache 2.0 |
+| `firebase` (npm) | 13.2.0 | Firebase client used by the rules tests, in `firestore_rules_test/` (development only) | Apache 2.0 |
+
+Versions are those locked in `pubspec.lock` and `firestore_rules_test/package-lock.json`. Each license was read from the package's own license file, or for npm from its lock entry. All are permissive open-source licenses that allow use in this project. They require keeping the copyright notice when the code is redistributed, and the Apache 2.0 packages also require keeping their NOTICE files. The packages these depend on have their own licenses, listed on each package's page on pub.dev or npm.
 
 ## Known issues and limitations
 

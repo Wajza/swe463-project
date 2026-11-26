@@ -5,12 +5,16 @@ class WalletBalanceCard extends StatefulWidget {
   const WalletBalanceCard({
     required this.balance,
     required this.held,
+    this.isLoading = false,
     this.earned,
     this.spent,
     super.key,
   });
 
-  final int balance;
+  /// Null while the balance has not loaded, so 0 is never shown in its
+  /// place: a spinner while [isLoading], otherwise a dash.
+  final int? balance;
+  final bool isLoading;
   final int held;
 
   /// Totals of the history shown in the wallet; left out when not given.
@@ -64,6 +68,40 @@ class _WalletBalanceCardState extends State<WalletBalanceCard> {
     );
   }
 
+  Widget _buildAmount(Color foreground) {
+    final style = TextStyle(
+      color: foreground,
+      fontSize: 34,
+      fontWeight: FontWeight.bold,
+    );
+    final balance = widget.balance;
+    if (balance != null) {
+      return Text(_isVisible ? '$balance' : '••••', style: style);
+    }
+    if (widget.isLoading) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 10),
+        child: Row(
+          spacing: 10,
+          children: [
+            SizedBox.square(
+              dimension: 22,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: foreground,
+              ),
+            ),
+            Text('Loading balance…', style: TextStyle(color: foreground)),
+          ],
+        ),
+      );
+    }
+    return Semantics(
+      label: 'Balance unavailable',
+      child: Text('—', style: style),
+    );
+  }
+
   Widget _buildBalance(Color foreground) => Row(
     children: [
       Expanded(
@@ -71,15 +109,8 @@ class _WalletBalanceCardState extends State<WalletBalanceCard> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Skill credits', style: TextStyle(color: foreground)),
-            Text(
-              _isVisible ? '${widget.balance}' : '••••',
-              style: TextStyle(
-                color: foreground,
-                fontSize: 34,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            if (_isVisible && widget.held > 0)
+            _buildAmount(foreground),
+            if (_isVisible && widget.balance != null && widget.held > 0)
               Text(
                 '${widget.held} on hold for active trades',
                 style: TextStyle(color: foreground),

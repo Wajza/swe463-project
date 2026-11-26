@@ -4,7 +4,9 @@ import 'package:souq_skills/services/trade_service.dart';
 import 'package:souq_skills/widgets/app_page.dart';
 import 'package:souq_skills/widgets/choice_chip_row.dart';
 import 'package:souq_skills/widgets/empty_state.dart';
+import 'package:souq_skills/widgets/listings_load_error.dart';
 import 'package:souq_skills/widgets/live_view.dart';
+import 'package:souq_skills/widgets/loading_indicator.dart';
 import 'package:souq_skills/widgets/trade_card.dart';
 
 enum _TradeFilter {
@@ -32,6 +34,36 @@ class _MyTradesScreenState extends State<MyTradesScreen> {
     _TradeFilter.all => true,
   };
 
+  /// The trades, or why they cannot be shown yet. The empty message
+  /// appears only once the trades have really loaded with none matching.
+  Widget _buildTrades() {
+    final service = TradeService();
+    final trades = service.all().where(_matches).toList();
+    final error = service.loadError;
+    return Column(
+      children: [
+        if (error != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: ListingsLoadError(
+              title: 'Could not load your trades',
+              message: error,
+              onRetry: service.retry,
+            ),
+          ),
+        if (service.isLoading)
+          const LoadingIndicator(label: 'Loading your trades…')
+        else if (trades.isEmpty && error == null)
+          const EmptyState(
+            title: 'Nothing here yet',
+            message: 'Propose a trade on any listing to get started.',
+            icon: Icons.swap_horiz,
+          ),
+        for (final trade in trades) TradeCard(trade: trade),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) => AppPage(
     title: 'My trades',
@@ -43,21 +75,7 @@ class _MyTradesScreenState extends State<MyTradesScreen> {
         onSelected: (filter) => setState(() => _filter = filter),
       ),
       const SizedBox(height: 14),
-      LiveView(
-        builder: (_) {
-          final trades = TradeService().all().where(_matches);
-          if (trades.isEmpty) {
-            return const EmptyState(
-              title: 'Nothing here yet',
-              message: 'Propose a trade on any listing to get started.',
-              icon: Icons.swap_horiz,
-            );
-          }
-          return Column(
-            children: [for (final trade in trades) TradeCard(trade: trade)],
-          );
-        },
-      ),
+      LiveView(builder: (_) => _buildTrades()),
     ],
   );
 }

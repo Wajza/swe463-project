@@ -6,6 +6,7 @@ import 'package:souq_skills/services/wallet_service.dart';
 
 import 'choice_chip_row.dart';
 import 'form_section.dart';
+import 'live_view.dart';
 import 'select_field.dart';
 import 'souq_button.dart';
 
@@ -45,7 +46,8 @@ class _ProposalFormState extends State<ProposalForm> {
       ? _OfferType.credits
       : _OfferType.skill;
   // Credits already held by this trade can be offered again in a counter.
-  late final int _availableCredits = WalletService().availableCredits(
+  // Read live, as the online wallet may still be loading when this opens.
+  int get _availableCredits => WalletService().availableCredits(
     excludingTradeId: widget.initial.tradeId,
   );
   bool _showErrors = false;
@@ -106,7 +108,39 @@ class _ProposalFormState extends State<ProposalForm> {
     onChanged: (skill) => _update(_proposal.copyWith(offeredSkill: skill)),
   );
 
-  Widget _buildCreditOffer() {
+  Widget _buildCreditOffer() => LiveView(builder: (_) => _buildCredits());
+
+  Widget _buildCredits() {
+    final wallet = WalletService();
+    if (!wallet.isLoaded) {
+      // Never "not enough credits" for a balance that has not arrived.
+      return FormSection(
+        title: 'Credits to offer',
+        errorText: _showErrors ? _offeredError : null,
+        child: wallet.isLoading
+            ? const Row(
+                spacing: 10,
+                children: [
+                  SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  Text('Loading your credits…'),
+                ],
+              )
+            : Row(
+                children: [
+                  const Expanded(
+                    child: Text('Your credits could not be loaded.'),
+                  ),
+                  TextButton(
+                    onPressed: wallet.retry,
+                    child: const Text('Try again'),
+                  ),
+                ],
+              ),
+      );
+    }
     final amounts = _affordableAmounts;
     return FormSection(
       title: 'Credits to offer ($_availableCredits available)',

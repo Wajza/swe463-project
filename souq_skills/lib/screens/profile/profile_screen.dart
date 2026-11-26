@@ -62,13 +62,17 @@ class ProfileScreen extends StatelessWidget {
                 onTap: () => context.open(AppRoutes.reviews),
               ),
               StatTile(
-                value: '${TradeService().completedCount()}',
+                value: TradeService().isLoaded
+                    ? '${TradeService().completedCount()}'
+                    : '…',
                 label: 'Trades',
                 icon: Icons.swap_horiz,
                 onTap: () => context.open(AppRoutes.myTrades),
               ),
               StatTile(
-                value: '${WalletService().balance}',
+                value: WalletService().isLoaded
+                    ? '${WalletService().balance}'
+                    : '…',
                 label: 'Credits',
                 icon: Icons.account_balance_wallet_outlined,
                 onTap: () => context.resetTo(AppRoutes.wallet),

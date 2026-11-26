@@ -10,6 +10,21 @@ import 'trade_service.dart';
 class WalletService {
   final Repository _repo = Repository.instance;
 
+  /// Whether the balance and history are ready to show. False while the
+  /// online wallet is loading or failed to load, so 0 is never shown as a
+  /// balance that has not arrived.
+  bool get isLoaded => !OnlineWallet.isActive || OnlineWallet.isLoaded;
+
+  /// Whether the online wallet is still loading.
+  bool get isLoading => OnlineWallet.isLoading;
+
+  /// What went wrong loading the online wallet, if anything.
+  String? get loadError =>
+      OnlineWallet.isActive ? OnlineWallet.loadError : null;
+
+  /// Loads the online wallet again after a failure.
+  void retry() => OnlineWallet.retry();
+
   int get balance => OnlineWallet.isActive
       ? OnlineWallet.balance
       : _repo.transactions.fold(0, (sum, item) => sum + item.amount);

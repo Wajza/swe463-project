@@ -42,9 +42,18 @@ abstract class ProfileRepository {
   /// Throws a [ProfileException] if it cannot be read.
   Future<User?> fetchProfile(String uid);
 
+  /// What [uid] chose to share, as saved with their profile, so a new
+  /// device or another account on this one starts from their own choices.
+  /// Profiles saved before these were stored get them worked out from what
+  /// their public profile shares (see [ProfileDocument.visibilityFrom]).
+  /// Null if there is nothing to go by: no profile, or one never published.
+  /// Throws a [ProfileException] if it cannot be read.
+  Future<ProfileVisibility?> fetchVisibility(String uid);
+
   /// Saves [profile] as the profile of [uid], keeping fields this app does
   /// not know about, claims its username, and publishes what [visibility]
-  /// allows at `publicProfiles/{uid}`, all together. The first save creates
+  /// allows at `publicProfiles/{uid}`, all together; [visibility] itself is
+  /// kept with the profile, private to the member. The first save creates
   /// the profile. Throws a [ProfileException] if it cannot be saved, or
   /// [ProfileException.usernameTaken] if another account has the username;
   /// nothing is changed then.
@@ -163,6 +172,41 @@ abstract final class ProfileDocument {
     'id': uid,
   };
 
+  /// The member's own [visibility] choices, stored with their private
+  /// profile at `users/{uid}`, named as in the app's settings.
+  static Map<String, dynamic> visibilityData(ProfileVisibility visibility) => {
+    'profileVisible': visibility.showProfile,
+    'locationVisible': visibility.showLocation,
+  };
+
+  /// The choices stored in the private profile [data], if both are there.
+  /// Otherwise, for profiles saved before they were stored, worked out from
+  /// what the public profile [publicData] shares: the Public profile switch
+  /// as published, and the location as shared only if a city is shown. A
+  /// hidden profile shows no city, so its location choice cannot be known
+  /// and is taken as private. Null without either to go by.
+  static ProfileVisibility? visibilityFrom(
+    Map<String, dynamic>? data,
+    Map<String, dynamic>? publicData,
+  ) {
+    final showProfile = data?['profileVisible'];
+    final showLocation = data?['locationVisible'];
+    if (showProfile is bool && showLocation is bool) {
+      return ProfileVisibility(
+        showProfile: showProfile,
+        showLocation: showLocation,
+      );
+    }
+    if (publicData == null) return null;
+    // As the rules read it: only an explicit true is public.
+    final shown = publicData['profileVisible'] == true;
+    final city = publicData['city'];
+    return ProfileVisibility(
+      showProfile: shown,
+      showLocation: shown && city is String && city.isNotEmpty,
+    );
+  }
+
   /// Reads stored [data], using empty values for any field that is missing
   /// or of the wrong type, so older or hand-edited records still open.
   static User fromData(Map<String, dynamic> data) => User(
@@ -214,6 +258,19 @@ class FirebaseProfileRepository implements ProfileRepository {
   Future<User?> fetchProfile(String uid) => _guard(() async {
     final data = (await _profileOf(uid).get()).data();
     return data == null ? null : ProfileDocument.fromData(data);
+  });
+
+  /// The public profile is read only for older profiles without the
+  /// choices stored.
+  @override
+  Future<ProfileVisibility?> fetchVisibility(String uid) => _guard(() async {
+    final data = (await _profileOf(uid).get()).data();
+    if (data == null) return null;
+    return ProfileDocument.visibilityFrom(data, null) ??
+        ProfileDocument.visibilityFrom(
+          data,
+          (await _publicOf(uid).get()).data(),
+        );
   });
 
   /// One transaction, so two accounts can never end up with the same name:
@@ -268,6 +325,7 @@ class FirebaseProfileRepository implements ProfileRepository {
         // and any fields this app does not know about.
         transaction.set(_profileOf(uid), {
           ...ProfileDocument.toData(uid, profile),
+          ...ProfileDocument.visibilityData(visibility),
           if (!current.exists) 'createdAt': FieldValue.serverTimestamp(),
           'updatedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
@@ -353,10 +411,13 @@ class DemoProfileRepository implements ProfileRepository {
   /// existed; [claims] maps usernames (any case) to the uid holding them.
   ///
   /// [profiles] also start without public profiles, like accounts made
-  /// before public profiles existed.
+  /// before public profiles existed, and without their visibility choices,
+  /// like accounts saved before those were stored. [publicProfiles] is
+  /// published data by uid, as `publicProfiles/{uid}` would hold it.
   DemoProfileRepository({
     Map<String, User>? profiles,
     Map<String, String>? claims,
+    Map<String, Map<String, dynamic>>? publicProfiles,
     this.isPhoneVerified = true,
   }) : _data = {
          for (final MapEntry(:key, :value) in (profiles ?? {}).entries)
@@ -365,12 +426,22 @@ class DemoProfileRepository implements ProfileRepository {
        _claims = {
          for (final MapEntry(:key, :value) in (claims ?? {}).entries)
            ProfileDocument.usernameKey(key): value,
+       },
+       _public = {
+         for (final MapEntry(:key, :value) in (publicProfiles ?? {}).entries)
+           key: {...value},
        };
 
   // Stored as data so it behaves like Firestore: a saved profile is a copy.
   final Map<String, Map<String, dynamic>> _data;
   final Map<String, String> _claims;
-  final Map<String, Map<String, dynamic>> _public = {};
+  final Map<String, Map<String, dynamic>> _public;
+
+  /// A copy of what is stored privately for [uid], or null if nothing is.
+  Map<String, dynamic>? storedDataOf(String uid) {
+    final data = _data[uid];
+    return data == null ? null : {...data};
+  }
 
   /// Whether accounts count as verified by phone when published.
   final bool isPhoneVerified;
@@ -400,6 +471,14 @@ class DemoProfileRepository implements ProfileRepository {
   }
 
   @override
+  Future<ProfileVisibility?> fetchVisibility(String uid) async {
+    final data = _data[uid];
+    return data == null
+        ? null
+        : ProfileDocument.visibilityFrom(data, _public[uid]);
+  }
+
+  @override
   Future<void> saveProfile(
     String uid,
     User profile, {
@@ -420,7 +499,11 @@ class DemoProfileRepository implements ProfileRepository {
     final claim = change.claim;
     if (claim != null) _claims[claim] = uid;
     _claims.remove(change.release);
-    _data[uid] = {...stored ?? {}, ...ProfileDocument.toData(uid, profile)};
+    _data[uid] = {
+      ...stored ?? {},
+      ...ProfileDocument.toData(uid, profile),
+      ...ProfileDocument.visibilityData(visibility),
+    };
     _public[uid] = ProfileDocument.toPublicData(
       uid,
       profile,

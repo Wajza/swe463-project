@@ -162,6 +162,9 @@ function saveProfile(db, uid, user, visibility = {}, { publish = true } = {}) {
       {
         ...user,
         id: uid,
+        // ProfileDocument.visibilityData: the member's own choices.
+        profileVisible: visibility.showProfile ?? true,
+        locationVisible: visibility.showLocation ?? true,
         ...(current.exists() ? {} : { createdAt: serverTimestamp() }),
         updatedAt: serverTimestamp(),
       },
@@ -308,6 +311,19 @@ describe('privacy', () => {
 
     await assertFails(getDoc(doc(dbAs(OTHER), 'users', ME)));
     await assertFails(getDoc(doc(anonymousDb(), 'users', ME)));
+  });
+
+  test('the sharing choices are saved with the profile, for the member only', async () => {
+    await assertSucceeds(saveProfile(dbAs(ME), ME, profile('maha_z'), { showProfile: false }));
+
+    const saved = (await assertSucceeds(getDoc(doc(dbAs(ME), 'users', ME)))).data();
+    assert.equal(saved.profileVisible, false);
+    assert.equal(saved.locationVisible, true);
+    await assertFails(getDoc(doc(dbAs(OTHER), 'users', ME)));
+    // Changed again by saving the profile with other choices.
+    await assertSucceeds(saveProfile(dbAs(ME), ME, profile('maha_z'), { showLocation: false }));
+    assert.equal((await read(`users/${ME}`)).profileVisible, true);
+    assert.equal((await read(`users/${ME}`)).locationVisible, false);
   });
 
   test('profiles and claims cannot be listed', async () => {

@@ -278,4 +278,133 @@ void main() {
       },
     );
   });
+
+  group('visibility choices', () {
+    const hidden = ProfileVisibility(showProfile: false, showLocation: false);
+    const noLocation = ProfileVisibility(showLocation: false);
+
+    /// [visibility] as a record, to compare.
+    (bool, bool)? choices(ProfileVisibility? visibility) => visibility == null
+        ? null
+        : (visibility.showProfile, visibility.showLocation);
+
+    /// What a member published, as ProfileDocument.toPublicData writes it.
+    Map<String, dynamic> published(ProfileVisibility visibility) =>
+        ProfileDocument.toPublicData(
+          _uid,
+          _profile,
+          visibility,
+          isVerified: true,
+        );
+
+    test('are stored with the private profile, named as in settings', () {
+      expect(ProfileDocument.visibilityData(noLocation), {
+        'profileVisible': true,
+        'locationVisible': false,
+      });
+    });
+
+    test('stored choices are read back as they are', () {
+      for (final visibility in [
+        const ProfileVisibility(),
+        noLocation,
+        hidden,
+        const ProfileVisibility(showProfile: false),
+      ]) {
+        final data = {
+          ...ProfileDocument.toData(_uid, _profile),
+          ...ProfileDocument.visibilityData(visibility),
+        };
+        // Even if the public profile says otherwise.
+        expect(
+          choices(ProfileDocument.visibilityFrom(data, published(hidden))),
+          choices(visibility),
+        );
+      }
+    });
+
+    test('older profiles get them from their public profile', () {
+      final older = ProfileDocument.toData(_uid, _profile);
+      (bool, bool)? from(Map<String, dynamic>? publicData) =>
+          choices(ProfileDocument.visibilityFrom(older, publicData));
+
+      expect(from(published(const ProfileVisibility())), (true, true));
+      expect(from(published(noLocation)), (true, false));
+      // Hidden: the location choice cannot be known, so it stays private.
+      expect(from(published(hidden)), (false, false));
+      expect(from(published(const ProfileVisibility(showProfile: false))), (
+        false,
+        false,
+      ));
+      // Published before the switch existed: only an explicit true counts.
+      expect(
+        from(
+          {...published(const ProfileVisibility())}..remove('profileVisible'),
+        ),
+        (false, false),
+      );
+      // Never published: nothing to go by.
+      expect(from(null), isNull);
+    });
+
+    test('one stored choice without the other counts as not stored', () {
+      final partial = {
+        ...ProfileDocument.toData(_uid, _profile),
+        'profileVisible': false,
+      };
+      expect(
+        choices(
+          ProfileDocument.visibilityFrom(
+            partial,
+            published(const ProfileVisibility()),
+          ),
+        ),
+        (true, true),
+      );
+      expect(
+        choices(
+          ProfileDocument.visibilityFrom({
+            ...ProfileDocument.toData(_uid, _profile),
+            'profileVisible': 'no',
+            'locationVisible': true,
+          }, null),
+        ),
+        isNull,
+      );
+    });
+
+    test('are saved and read back by the repository', () async {
+      final repository = DemoProfileRepository();
+      await repository.saveProfile(_uid, _profile, visibility: noLocation);
+
+      expect(
+        repository.storedDataOf(_uid),
+        containsPair('locationVisible', false),
+      );
+      expect(
+        repository.storedDataOf(_uid),
+        containsPair('profileVisible', true),
+      );
+      expect(choices(await repository.fetchVisibility(_uid)), (true, false));
+      // The profile itself reads the same as before.
+      expect(
+        (await repository.fetchProfile(_uid))!.toJson(),
+        _profile.toJson(),
+      );
+
+      await repository.saveProfile(_uid, _profile, visibility: hidden);
+      expect(choices(await repository.fetchVisibility(_uid)), (false, false));
+    });
+
+    test('older accounts in the repository fall back, or have none', () async {
+      final repository = DemoProfileRepository(
+        profiles: {_uid: _profile, 'unpublished': _profile},
+        publicProfiles: {_uid: published(hidden)},
+      );
+
+      expect(choices(await repository.fetchVisibility(_uid)), (false, false));
+      expect(await repository.fetchVisibility('unpublished'), isNull);
+      expect(await repository.fetchVisibility('no-such-account'), isNull);
+    });
+  });
 }

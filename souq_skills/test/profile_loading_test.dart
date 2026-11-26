@@ -32,6 +32,10 @@ class _FailingProfiles implements ProfileRepository {
       throw const ProfileException('Check your internet connection.');
 
   @override
+  Future<ProfileVisibility?> fetchVisibility(String uid) async =>
+      throw const ProfileException('Check your internet connection.');
+
+  @override
   Future<void> saveProfile(
     String uid,
     User profile, {
@@ -45,6 +49,27 @@ class _FailingProfiles implements ProfileRepository {
   @override
   Future<void> deleteProfile(String uid) async {}
 }
+
+/// Has the profile, but its sharing choices cannot be read.
+class _UnreadableChoices extends DemoProfileRepository {
+  _UnreadableChoices() : super(profiles: {_uid: _maha});
+
+  @override
+  Future<ProfileVisibility?> fetchVisibility(String uid) async =>
+      throw const ProfileException('Check your internet connection.');
+}
+
+const _hidden = ProfileVisibility(showProfile: false, showLocation: false);
+
+/// The device's current sharing choices, to compare.
+(bool, bool) _deviceChoices() => (
+  Repository.instance.settings.profileVisible,
+  Repository.instance.settings.locationVisible,
+);
+
+/// What [profiles] publishes for the account, to check nothing leaked.
+Map<String, dynamic> _published(DemoProfileRepository profiles) =>
+    profiles.publicDataOf(_uid)!;
 
 class _RecordingAuth extends DemoAuthRepository {
   _RecordingAuth() : super(isKnownPhone: AuthService().isKnownPhone);
@@ -153,6 +178,163 @@ void main() {
     });
   });
 
+  group('sharing choices at sign-in', () {
+    testWidgets('a new device restores a hidden profile, so an edit keeps it '
+        'hidden', (tester) async {
+      final profiles = DemoProfileRepository();
+      await profiles.saveProfile(_uid, _maha, visibility: _hidden);
+      AuthService.profiles = profiles;
+      // A fresh start shares everything.
+      expect(_deviceChoices(), (true, true));
+
+      await _verify(tester, '512345678');
+
+      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(_deviceChoices(), (false, false));
+
+      // The first edit used to publish the profile again.
+      await ProfileService().addOfferedSkill('Baking');
+
+      expect(_published(profiles)['profileVisible'], isFalse);
+      expect(_published(profiles)['city'], '');
+      expect(_published(profiles)['skillsOffered'], isEmpty);
+      expect(
+        (await profiles.fetchProfile(_uid))!.skillsOffered,
+        contains('Baking'),
+      );
+      expect(
+        profiles.storedDataOf(_uid),
+        allOf(
+          containsPair('profileVisible', false),
+          containsPair('locationVisible', false),
+        ),
+      );
+    });
+
+    testWidgets('a private location is restored and stays private', (
+      tester,
+    ) async {
+      final profiles = DemoProfileRepository();
+      await profiles.saveProfile(
+        _uid,
+        _maha,
+        visibility: const ProfileVisibility(showLocation: false),
+      );
+      AuthService.profiles = profiles;
+
+      await _verify(tester, '512345678');
+
+      expect(_deviceChoices(), (true, false));
+      await ProfileService().saveProfile(
+        ProfileService().currentUser.copyWith(bio: 'Teaches calligraphy.'),
+      );
+      expect(_published(profiles)['bio'], 'Teaches calligraphy.');
+      expect(_published(profiles)['city'], '');
+    });
+
+    testWidgets("another account on this device gets its own choices, not "
+        "the last account's", (tester) async {
+      // The previous account on this device kept its profile hidden.
+      await deviceAccount.write('uid-previous');
+      repository.updateSettings(
+        repository.settings.copyWith(
+          profileVisible: false,
+          locationVisible: false,
+        ),
+      );
+      // This account shares its profile but not its location: neither the
+      // last account's choices nor a fresh start's defaults.
+      final profiles = DemoProfileRepository();
+      await profiles.saveProfile(
+        _uid,
+        _maha,
+        visibility: const ProfileVisibility(showLocation: false),
+      );
+      AuthService.profiles = profiles;
+
+      await _verify(tester, '512345678');
+
+      expect(_deviceChoices(), (true, false));
+      expect(await deviceAccount.read(), _uid);
+    });
+
+    testWidgets("the same account's stale choices on this device are "
+        'replaced; other settings stay', (tester) async {
+      await deviceAccount.write(_uid);
+      repository.updateSettings(repository.settings.copyWith(darkMode: true));
+      final profiles = DemoProfileRepository();
+      // Hidden from another device since.
+      await profiles.saveProfile(
+        _uid,
+        repository.currentUser,
+        visibility: _hidden,
+      );
+      AuthService.profiles = profiles;
+
+      await _verify(tester, '501234567');
+
+      expect(_deviceChoices(), (false, false));
+      expect(repository.settings.darkMode, isTrue);
+      expect(TradeService().all(), isNotEmpty);
+    });
+
+    testWidgets('an older account keeps what its public profile shows', (
+      tester,
+    ) async {
+      final profiles = DemoProfileRepository(
+        profiles: {_uid: _maha},
+        publicProfiles: {
+          _uid: ProfileDocument.toPublicData(
+            _uid,
+            _maha,
+            _hidden,
+            isVerified: true,
+          ),
+        },
+      );
+      AuthService.profiles = profiles;
+
+      await _verify(tester, '512345678');
+
+      expect(_deviceChoices(), (false, false));
+      await ProfileService().addOfferedSkill('Baking');
+      expect(_published(profiles)['profileVisible'], isFalse);
+      // From now on the choices are stored with the profile.
+      expect(
+        profiles.storedDataOf(_uid),
+        containsPair('profileVisible', false),
+      );
+    });
+
+    testWidgets('an account never published keeps the choices on this device', (
+      tester,
+    ) async {
+      AuthService.profiles = DemoProfileRepository(profiles: {_uid: _maha});
+
+      await _verify(tester, '512345678');
+
+      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(_deviceChoices(), (true, true));
+    });
+
+    testWidgets('if the choices cannot be read, sign-in stops safely', (
+      tester,
+    ) async {
+      final auth = _RecordingAuth();
+      AuthService.repository = auth;
+      AuthService.profiles = _UnreadableChoices();
+      final before = repository.currentUser.toJson();
+
+      await _verify(tester, '512345678');
+
+      expect(find.text('Check your internet connection.'), findsOneWidget);
+      expect(find.byType(HomeScreen), findsNothing);
+      expect(repository.currentUser.toJson(), before);
+      expect(repository.isSignedIn, isFalse);
+      expect(auth.signOuts, 1);
+    });
+  });
+
   group('when the app opens signed in', () {
     /// Saves the demo member as signed in, as if the app had been closed.
     Future<void> saveSignedIn() async {
@@ -174,6 +356,56 @@ void main() {
       expect(find.byType(HomeScreen), findsOneWidget);
       expect(ProfileService().currentUser.name, 'Maha Alzahrani');
       expect(TradeService().all(), isEmpty);
+    });
+
+    testWidgets('the sharing choices are restored before Home', (tester) async {
+      await saveSignedIn();
+      final profiles = DemoProfileRepository();
+      await profiles.saveProfile(_uid, _maha, visibility: _hidden);
+      AuthService.profiles = profiles;
+
+      await tester.pumpWidget(const SouqSkillsApp());
+      await tester.pumpAndSettle();
+
+      expect(find.byType(HomeScreen), findsOneWidget);
+      expect(_deviceChoices(), (false, false));
+      // Older accounts are published if missing at start-up: this one is
+      // published already, hidden, and stays so.
+      expect(_published(profiles)['profileVisible'], isFalse);
+    });
+
+    testWidgets('restored choices are also what this device saves', (
+      tester,
+    ) async {
+      await saveSignedIn();
+      await deviceAccount.write(_uid);
+      final profiles = DemoProfileRepository();
+      await profiles.saveProfile(
+        _uid,
+        repository.currentUser,
+        visibility: _hidden,
+      );
+      AuthService.profiles = profiles;
+
+      await tester.pumpWidget(const SouqSkillsApp());
+      await tester.pumpAndSettle();
+      await repository.save();
+
+      expect(source.snapshot, contains('"profileVisible":false'));
+      expect(source.snapshot, contains('"locationVisible":false'));
+    });
+
+    testWidgets('choices that cannot be read keep another account out', (
+      tester,
+    ) async {
+      await saveSignedIn();
+      AuthService.profiles = _UnreadableChoices();
+
+      await tester.pumpWidget(const SouqSkillsApp());
+      await tester.pumpAndSettle();
+
+      expect(find.text('Could not load your data'), findsOneWidget);
+      expect(find.byType(HomeScreen), findsNothing);
     });
 
     testWidgets('a failure does not open another account\'s data', (

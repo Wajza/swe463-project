@@ -104,15 +104,17 @@ class AuthService {
       throw const AuthException('Your session has expired. Sign in again.');
     }
     final User? profile;
+    final ProfileVisibility? visibility;
     try {
-      profile = await profiles.fetchProfile(uid);
+      (profile, visibility) = await _fetchAccount(profiles, uid);
     } on ProfileException catch (error) {
-      // Never continue half signed in, or with another account's data.
+      // Never continue half signed in, or with another account's data, or
+      // with sharing choices that are not the member's own.
       await _signOutQuietly();
       throw AuthException(error.message);
     }
     if (profile == null) return false;
-    await _openAccount(uid, profile);
+    await _openAccount(uid, profile, visibility);
     signIn();
     // Accounts from before public profiles get one now; signing in never
     // waits for or depends on it.
@@ -130,10 +132,12 @@ class AuthService {
     final uid = repository.uid;
     if (profiles == null || uid == null || !_repo.isSignedIn) return;
     final User? profile;
+    final ProfileVisibility? visibility;
     try {
-      profile = await profiles.fetchProfile(uid);
+      (profile, visibility) = await _fetchAccount(profiles, uid);
     } on ProfileException {
-      // Offline, the member can still open their own saved copy.
+      // Offline, the member can still open their own saved copy, with the
+      // sharing choices last saved on this device.
       if (await _deviceOwner() == uid) return;
       rethrow;
     }
@@ -141,20 +145,50 @@ class AuthService {
       _setSignedIn(false);
       return;
     }
-    await _openAccount(uid, profile);
+    await _openAccount(uid, profile, visibility);
     ProfileService().publishIfMissing().ignore();
+  }
+
+  /// The profile of [uid] and, if it has one, the sharing choices saved
+  /// with it. Throws a [ProfileException] if either cannot be read.
+  static Future<(User?, ProfileVisibility?)> _fetchAccount(
+    ProfileRepository profiles,
+    String uid,
+  ) async {
+    final profile = await profiles.fetchProfile(uid);
+    if (profile == null) return (null, null);
+    return (profile, await profiles.fetchVisibility(uid));
   }
 
   /// Shows [profile] as the current member. Data saved on this device for
   /// another account (or for nobody known) is replaced by a fresh start.
-  Future<void> _openAccount(String uid, User profile) async {
-    if (await _deviceOwner() == uid) {
+  ///
+  /// The member's own [visibility] choices replace those on this device
+  /// before anything can save the profile, so the public profile is never
+  /// republished with a fresh start's defaults or another device's stale
+  /// choices. Without any (a profile never published), those on this
+  /// device are kept.
+  Future<void> _openAccount(
+    String uid,
+    User profile,
+    ProfileVisibility? visibility,
+  ) async {
+    final isOwner = await _deviceOwner() == uid;
+    if (isOwner) {
       _repo.updateUser(profile);
-      return;
+    } else {
+      _repo.load(SeedData.newMember(profile));
+      _repo.hasAccount = true;
     }
-    _repo.load(SeedData.newMember(profile));
-    _repo.hasAccount = true;
-    await _rememberDeviceOwner(uid);
+    if (visibility != null) {
+      _repo.updateSettings(
+        _repo.settings.copyWith(
+          profileVisible: visibility.showProfile,
+          locationVisible: visibility.showLocation,
+        ),
+      );
+    }
+    if (!isOwner) await _rememberDeviceOwner(uid);
   }
 
   /// An unreadable owner counts as unknown, which only ever starts fresh.

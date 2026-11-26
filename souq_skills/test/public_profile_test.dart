@@ -292,6 +292,39 @@ void main() {
       expect(ProfileService().settings.profileVisible, isTrue);
       expect(profiles.publicDataOf(_maha)!['bio'], 'Maha teaches.');
     });
+
+    testWidgets('stays off when signing in on another device', (tester) async {
+      await _start(tester);
+      await _signIn(tester);
+      await _openSettings(tester);
+      await tester.tap(publicSwitch());
+      await tester.pumpAndSettle();
+      expect(
+        profiles.storedDataOf(_maha),
+        containsPair('profileVisible', false),
+      );
+
+      // A new device: nothing saved on it, owned by nobody known.
+      await tester.pumpWidget(const SizedBox());
+      repository
+        ..dataSource = MemoryDataSource()
+        ..reset();
+      AuthService.deviceAccount = MemoryDeviceAccountStore();
+      expect(ProfileService().settings.profileVisible, isTrue);
+      await _start(tester);
+      await _signIn(tester);
+
+      expect(ProfileService().settings.profileVisible, isFalse);
+      await _openSettings(tester);
+      expect(tester.widget<SwitchListTile>(publicSwitch()).value, isFalse);
+
+      // Editing on the new device does not publish the profile again.
+      await ProfileService().addOfferedSkill('Baking');
+      final shown = profiles.publicDataOf(_maha)!;
+      expect(shown['profileVisible'], isFalse);
+      expect(shown['bio'], '');
+      expect(shown['skillsOffered'], isEmpty);
+    });
   });
 
   group('members from public profiles', () {

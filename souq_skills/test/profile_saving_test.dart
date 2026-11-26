@@ -28,6 +28,9 @@ class _FakeProfiles implements ProfileRepository {
   Future<User?> fetchProfile(String uid) async => stored;
 
   @override
+  Future<ProfileVisibility?> fetchVisibility(String uid) async => null;
+
+  @override
   Future<Map<String, User>> fetchPublicProfiles(Iterable<String> uids) async =>
       {for (final uid in uids) uid: ?stored};
 

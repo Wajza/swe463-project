@@ -10,6 +10,8 @@ class AppTextField extends StatelessWidget {
     this.keyboardType,
     this.maxLines = 1,
     this.maxLength,
+    this.textInputAction,
+    this.onSubmitted,
     super.key,
   });
 
@@ -22,6 +24,14 @@ class AppTextField extends StatelessWidget {
   final int maxLines;
   final int? maxLength;
 
+  /// The keyboard's action key, e.g. next to move to the following field
+  /// or done on the last one.
+  final TextInputAction? textInputAction;
+
+  /// Called when the action key (Enter on a hardware keyboard) is pressed,
+  /// such as to submit the form from its last field.
+  final ValueChanged<String>? onSubmitted;
+
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 14),
@@ -31,6 +41,8 @@ class AppTextField extends StatelessWidget {
       keyboardType: keyboardType,
       maxLines: maxLines,
       maxLength: maxLength,
+      textInputAction: textInputAction,
+      onFieldSubmitted: onSubmitted,
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,

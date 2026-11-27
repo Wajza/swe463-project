@@ -71,17 +71,38 @@ class _InviteMemberSheetState extends State<InviteMemberSheet> {
     () => GroupTradeService().inviteByUsername(widget.group, username),
   );
 
-  @override
-  Widget build(BuildContext context) {
+  /// Who [query] can invite: the matching members, the typed username, and
+  /// whether an online group can invite that exact username.
+  ({List<User> matches, String typed, bool canInviteTyped}) _targets(
+    String query,
+  ) {
     final service = GroupTradeService();
-    final matches = service.inviteCandidates(widget.group, _query);
-    final typed = _query.trim().replaceFirst('@', '');
+    final matches = service.inviteCandidates(widget.group, query);
+    final typed = query.trim().replaceFirst('@', '');
     final canInviteTyped =
         service.isOnline(widget.group) &&
-        _username.hasMatch(_query.trim()) &&
+        _username.hasMatch(query.trim()) &&
         !matches.any(
           (member) => member.username.toLowerCase() == typed.toLowerCase(),
         );
+    return (matches: matches, typed: typed, canInviteTyped: canInviteTyped);
+  }
+
+  /// Pressing Enter invites the one member [text] clearly means, as tapping
+  /// their row would; with several matches or none, nothing happens.
+  void _inviteTyped(String text) {
+    final (:matches, :typed, :canInviteTyped) = _targets(text);
+    final exact = matches.where(
+      (member) => member.username.toLowerCase() == typed.toLowerCase(),
+    );
+    if (exact.length == 1) return _invite(exact.single);
+    if (canInviteTyped) return _inviteByUsername(typed);
+    if (matches.length == 1) _invite(matches.single);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final (:matches, :typed, :canInviteTyped) = _targets(_query);
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.fromLTRB(
@@ -95,6 +116,8 @@ class _InviteMemberSheetState extends State<InviteMemberSheet> {
           children: [
             TextField(
               autofocus: true,
+              textInputAction: TextInputAction.send,
+              onSubmitted: _inviteTyped,
               onChanged: (value) => setState(() {
                 _query = value;
                 _error = null;

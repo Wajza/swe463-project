@@ -31,6 +31,8 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   }
 
   Future<void> _verify() async {
+    // Also reached by pressing Enter, which the disabled button cannot stop.
+    if (_verifying) return;
     if (!_formKey.currentState!.validate()) return;
     final code = _code.text.trim();
     setState(() => _verifying = true);
@@ -83,6 +85,8 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
           keyboardType: TextInputType.number,
           maxLength: 6,
           validator: AppValidators.otp,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _verify(),
         ),
       ),
     ],

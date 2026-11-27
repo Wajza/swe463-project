@@ -41,6 +41,8 @@ class _CreateAccountProfileScreenState
   }
 
   Future<void> _submit() async {
+    // Also reached by pressing Enter, which the disabled button cannot stop.
+    if (_saving) return;
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
     try {
@@ -77,13 +79,19 @@ class _CreateAccountProfileScreenState
               controller: _firstName,
               label: 'First name',
               validator: AppValidators.personName,
+              textInputAction: TextInputAction.next,
             ),
             AppTextField(
               controller: _lastName,
               label: 'Last name',
               validator: AppValidators.personName,
+              textInputAction: TextInputAction.next,
             ),
-            UsernameField(controller: _username),
+            UsernameField(
+              controller: _username,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _submit(),
+            ),
           ],
         ),
       ),

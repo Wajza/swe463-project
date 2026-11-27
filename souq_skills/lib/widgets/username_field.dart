@@ -9,11 +9,15 @@ class UsernameField extends StatelessWidget {
   const UsernameField({
     required this.controller,
     this.isEditingOwn = false,
+    this.textInputAction,
+    this.onSubmitted,
     super.key,
   });
 
   final TextEditingController controller;
   final bool isEditingOwn;
+  final TextInputAction? textInputAction;
+  final ValueChanged<String>? onSubmitted;
 
   String? _validate(String? value) {
     final formatError = AppValidators.username(value);
@@ -31,5 +35,7 @@ class UsernameField extends StatelessWidget {
     label: 'Username',
     prefixText: '@',
     validator: _validate,
+    textInputAction: textInputAction,
+    onSubmitted: onSubmitted,
   );
 }

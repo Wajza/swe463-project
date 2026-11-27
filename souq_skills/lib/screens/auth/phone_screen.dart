@@ -29,6 +29,8 @@ class _PhoneScreenState extends State<PhoneScreen> {
   }
 
   Future<void> _continue() async {
+    // Also reached by pressing Enter, which the disabled button cannot stop.
+    if (_sending) return;
     if (!_formKey.currentState!.validate()) return;
     final phone = _phone.text.trim();
     setState(() => _sending = true);
@@ -69,6 +71,8 @@ class _PhoneScreenState extends State<PhoneScreen> {
           prefixText: '+966 ',
           keyboardType: TextInputType.phone,
           validator: AppValidators.phone,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) => _continue(),
         ),
       ),
       const Text(

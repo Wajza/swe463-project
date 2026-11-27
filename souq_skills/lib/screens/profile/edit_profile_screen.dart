@@ -70,7 +70,21 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     return verified == true;
   }
 
+  /// True from pressing Save (or Enter) until saving ends, including while
+  /// a new phone number is verified, so the profile is never saved twice.
+  bool _submitting = false;
+
   Future<void> _save() async {
+    if (_submitting) return;
+    _submitting = true;
+    try {
+      await _saveProfile();
+    } finally {
+      _submitting = false;
+    }
+  }
+
+  Future<void> _saveProfile() async {
     if (!_formKey.currentState!.validate()) return;
     final phone = _phone.text.trim();
     if (!await _verifyPhoneIfChanged(phone) || !mounted) return;
@@ -121,19 +135,28 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               controller: _firstName,
               label: 'First name',
               validator: AppValidators.personName,
+              textInputAction: TextInputAction.next,
             ),
             AppTextField(
               controller: _lastName,
               label: 'Last name',
               validator: AppValidators.personName,
+              textInputAction: TextInputAction.next,
             ),
-            UsernameField(controller: _username, isEditingOwn: true),
+            UsernameField(
+              controller: _username,
+              isEditingOwn: true,
+              textInputAction: TextInputAction.next,
+            ),
             AppTextField(
               controller: _phone,
               label: 'Phone number',
               prefixText: '+966 ',
               keyboardType: TextInputType.phone,
               validator: AppValidators.phone,
+              // The last one-line field; the bio below takes new lines.
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _save(),
             ),
             AppTextField(
               controller: _bio,

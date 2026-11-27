@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:souq_skills/core/app_routes.dart';
+import 'package:souq_skills/core/feedback.dart';
 import 'package:souq_skills/core/navigation.dart';
 import 'package:souq_skills/models/trade.dart';
 import 'package:souq_skills/models/trade_proposal.dart';
@@ -18,6 +19,18 @@ class ProposalCard extends StatelessWidget {
   const ProposalCard({required this.proposal, super.key});
 
   final TradeProposal proposal;
+
+  /// Runs an answer to the proposal and confirms it once saved; a failure
+  /// is explained by [TradeActionFeedback.runTradeAction].
+  static Future<void> _respond(
+    BuildContext context,
+    Future<void> Function() action,
+    String done,
+  ) async {
+    if (await context.runTradeAction(action) && context.mounted) {
+      context.showMessage(done);
+    }
+  }
 
   List<Widget> _actions(BuildContext context) {
     final service = ProposalService();
@@ -39,16 +52,22 @@ class ProposalCard extends StatelessWidget {
       return [
         counter,
         TextButton(
-          onPressed: () =>
-              context.runTradeAction(() => service.cancel(proposal.id)),
+          onPressed: () => _respond(
+            context,
+            () => service.cancel(proposal.id),
+            'Proposal cancelled',
+          ),
           child: const Text('Cancel'),
         ),
       ];
     }
     return [
       TextButton(
-        onPressed: () =>
-            context.runTradeAction(() => service.accept(proposal.id)),
+        onPressed: () => _respond(
+          context,
+          () => service.accept(proposal.id),
+          'Proposal accepted. Schedule a session next.',
+        ),
         child: const Text('Accept'),
       ),
       counter,

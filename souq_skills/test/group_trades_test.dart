@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:souq_skills/core/badge_config.dart';
 import 'package:souq_skills/data/auth_repository.dart';
 import 'package:souq_skills/data/chat_repository.dart';
 import 'package:souq_skills/data/device_account_store.dart';
@@ -13,6 +14,7 @@ import 'package:souq_skills/models/skill_post.dart';
 import 'package:souq_skills/models/user.dart';
 import 'package:souq_skills/screens/group_trades/group_trade_details_screen.dart';
 import 'package:souq_skills/services/auth_service.dart';
+import 'package:souq_skills/services/badge_service.dart';
 import 'package:souq_skills/services/chat_service.dart';
 import 'package:souq_skills/services/group_trade_service.dart';
 import 'package:souq_skills/services/member_service.dart';
@@ -21,6 +23,7 @@ import 'package:souq_skills/services/online_trades.dart';
 import 'package:souq_skills/services/online_wallet.dart';
 import 'package:souq_skills/services/posting_service.dart';
 import 'package:souq_skills/services/repository.dart';
+import 'package:souq_skills/services/seed_data.dart';
 import 'package:souq_skills/services/wallet_service.dart';
 
 import 'support/memory_data_source.dart';
@@ -646,6 +649,120 @@ void main() {
         GroupTradeService().all().where(GroupTradeService().isOnline),
         hasLength(1),
       );
+    });
+
+    group('the Community Builder badge', () {
+      int progress() => BadgeService()
+          .badges()
+          .firstWhere((badge) => badge.id == BadgeConfig.communityBuilder)
+          .progress;
+
+      int announcements() => repository.notifications
+          .where((item) => item.title == 'Badge earned: Community Builder')
+          .length;
+
+      /// Starts Maha as a new account: no groups on this device count.
+      Future<void> freshAccount() async {
+        repository.load(SeedData.newMember(_user('Maha', 'maha_z')));
+        await _settle();
+      }
+
+      test('counts only groups the member joined, each once, live', () async {
+        await freshAccount();
+        expect(progress(), 0);
+
+        // An invitation alone does not count, nor someone else's group.
+        final id = await groups.create(_sami, _draft);
+        await groups.invite(_sami, id, _maha);
+        await groups.create(_lina, _draft);
+        await _settle();
+        expect(progress(), 0);
+        expect(announcements(), 0);
+
+        // Accepted (here as from another device): the group arrives live,
+        // after the change was saved, and the badge is earned once.
+        await groups.respondToInvitation(_maha, id, accept: true);
+        await _settle();
+        expect(progress(), 1);
+        expect(BadgeService().isLoaded, isTrue);
+        expect(announcements(), 1);
+
+        // Declining another invitation changes nothing.
+        final other = await groups.create(_lina, _draft);
+        await groups.invite(_lina, other, _maha);
+        await groups.respondToInvitation(_maha, other, accept: false);
+        await _settle();
+        expect(progress(), 1);
+
+        // Completing keeps it counted once; nothing is announced again.
+        await groups.confirmCompletion(_sami, id);
+        await GroupTradeService().complete(id);
+        await _settle();
+        expect(GroupTradeService().byId(id)!.isCompleted, isTrue);
+        expect(progress(), 1);
+        expect(announcements(), 1);
+      });
+
+      test('accepting in the app earns it once the group arrives', () async {
+        await freshAccount();
+        final id = await groups.create(_sami, _draft);
+        await groups.invite(_sami, id, _maha);
+        await _settle();
+
+        await GroupTradeService().acceptInvitation(id);
+        await _settle();
+
+        expect(progress(), 1);
+        expect(announcements(), 1);
+      });
+
+      test(
+        'leaving, being removed or a cancelled group stop counting',
+        () async {
+          await freshAccount();
+          final kept = await groups.create(_sami, _draft);
+          final cancelled = await groups.create(_lina, _draft);
+          for (final (owner, id) in [(_sami, kept), (_lina, cancelled)]) {
+            await groups.invite(owner, id, _maha);
+            await groups.respondToInvitation(_maha, id, accept: true);
+          }
+          await _settle();
+          expect(progress(), 2);
+
+          await groups.cancel(_lina, cancelled);
+          await _settle();
+          expect(progress(), 1);
+
+          await groups.removeMember(_sami, kept, _maha);
+          await _settle();
+          expect(progress(), 0);
+        },
+      );
+
+      test('another account never keeps the previous count', () async {
+        await freshAccount();
+        final id = await groups.create(_sami, _draft);
+        await groups.invite(_sami, id, _maha);
+        await groups.respondToInvitation(_maha, id, accept: true);
+        await _settle();
+        expect(progress(), 1);
+
+        // Lina signs in on this device, then Sami, the group's organizer.
+        await AuthService().signOut();
+        auth.currentUid = _lina;
+        expect(await AuthService().verifyCode('123456'), isTrue);
+        await _settle();
+        expect(progress(), 0);
+        expect(BadgeService().isLoaded, isTrue);
+
+        await AuthService().signOut();
+        auth.currentUid = _sami;
+        expect(await AuthService().verifyCode('123456'), isTrue);
+        await _settle();
+        expect(progress(), 1);
+        // Earned before this sign-in: recorded, not announced again.
+        expect(announcements(), 0);
+      });
     });
 
     test('a loading error is reported and what loaded stays shown', () async {

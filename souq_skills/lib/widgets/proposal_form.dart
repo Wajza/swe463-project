@@ -62,7 +62,14 @@ class _ProposalFormState extends State<ProposalForm> {
 
   String? get _offeredError {
     if (_isOfferingCredits) {
-      return _proposal.creditsOffered == 0 ? 'Choose an amount' : null;
+      if (_proposal.creditsOffered == 0) return 'Choose an amount';
+      // Never more than can be paid, such as an amount kept from earlier
+      // terms; the server also refuses paying below zero at completion.
+      final wallet = WalletService();
+      if (!wallet.isLoaded) return 'Wait for your credits to load';
+      return _proposal.creditsOffered > _availableCredits
+          ? 'You don’t have enough credits for this amount'
+          : null;
     }
     return _offered.isEmpty ? 'Choose a skill to offer' : null;
   }

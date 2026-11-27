@@ -412,6 +412,8 @@ class DemoWalletRepository implements WalletRepository {
     Map<String, dynamic> trade,
     DateTime now,
   ) {
+    // As the rules: only a member of the trade settles it.
+    TradeDocument.otherOf(trade, uid);
     WalletDocument.checkCanSettle(uid, trade, _wallets[uid]);
     final settlement = WalletDocument.settle(tradeId, trade, now);
     for (final member in settlement) {
@@ -421,11 +423,17 @@ class DemoWalletRepository implements WalletRepository {
       // below zero, and each entry written once.
       if (balance == null ||
           wallet!['lastTradeId'] == tradeId ||
-          balance + member.delta < 0 ||
           member.entries.keys.any(
             (id) => _entries[member.uid]?.containsKey(id) ?? false,
           )) {
         throw TradeException.notSaved;
+      }
+      if (balance + member.delta < 0) {
+        // The caller's own shortfall was refused above; the other
+        // member's is refused by the rules, as the app explains it.
+        throw member.uid == uid
+            ? TradeException.insufficientCredits
+            : TradeException.otherShortOfCredits;
       }
     }
     for (final member in settlement) {

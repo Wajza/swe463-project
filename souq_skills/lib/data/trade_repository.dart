@@ -34,6 +34,13 @@ class TradeException implements Exception {
     'You do not have enough credits to complete this trade.',
   );
 
+  /// Completing was refused while the other member pays the trade's
+  /// credits: their balance cannot be read, so the likely reason is given.
+  static const otherShortOfCredits = TradeException(
+    'This trade could not be completed. The other member may not have '
+    'enough credits yet.',
+  );
+
   @override
   String toString() => message;
 }
@@ -697,9 +704,16 @@ class FirebaseTradeRepository implements TradeRepository {
     final tradeRef = _trade(tradeId);
     await _openWallet(wallets, uid);
     var completed = false;
+    // Whether the latest attempt completes a trade the other member pays
+    // for, whose balance only the rules can check.
+    var otherPays = false;
     await _change(tradeRef, (transaction, trade) async {
       final result = TradeDocument.confirm(uid, trade: trade, now: _now);
       var settlement = const <WalletSettlement>[];
+      otherPays =
+          result.completed &&
+          WalletDocument.paymentOf(TradeDocument.otherOf(trade, uid), trade) <
+              0;
       if (result.completed) {
         // Reads come before writes. Only the caller's own wallet can be
         // read; the rules check the other member's.
@@ -710,7 +724,7 @@ class FirebaseTradeRepository implements TradeRepository {
       completed = result.completed;
       _apply(transaction, tradeRef, result.change);
       wallets.applySettlement(transaction, tradeId, settlement, _now);
-    });
+    }, onDenied: () => otherPays ? TradeException.otherShortOfCredits : null);
     return completed;
   }
 
@@ -754,15 +768,18 @@ class FirebaseTradeRepository implements TradeRepository {
       .transform(_errors('We could not load your proposals.'));
 
   /// Runs [change] on the stored trade in a transaction, so it is decided
-  /// from the latest state.
+  /// from the latest state. Firestore retries it when the trade changed
+  /// meanwhile, such as both members confirming at the same time.
   Future<void> _change(
     DocumentReference<Map<String, dynamic>> tradeRef,
-    Future<void> Function(Transaction, Map<String, dynamic> trade) change,
-  ) => _guard(
+    Future<void> Function(Transaction, Map<String, dynamic> trade) change, {
+    TradeException? Function()? onDenied,
+  }) => _guard(
     () => _firestore.runTransaction((transaction) async {
       final trade = await _read(transaction, tradeRef);
       await change(transaction, trade);
     }),
+    onDenied: onDenied,
   );
 
   static Future<Map<String, dynamic>> _read(
@@ -798,12 +815,21 @@ class FirebaseTradeRepository implements TradeRepository {
         ),
       );
 
-  static Future<T> _guard<T>(Future<T> Function() action) async {
+  /// Runs [action], turning Firebase errors into [TradeException]s. A
+  /// refusal by the rules is explained by [onDenied] when it knows why.
+  static Future<T> _guard<T>(
+    Future<T> Function() action, {
+    TradeException? Function()? onDenied,
+  }) async {
     try {
       return await action();
     } on TradeException {
       rethrow;
     } on FirebaseException catch (error) {
+      final denied = error.code == 'permission-denied'
+          ? onDenied?.call()
+          : null;
+      if (denied != null) throw denied;
       throw switch (error.code) {
         'unavailable' => const TradeException(
           'Check your internet connection.',

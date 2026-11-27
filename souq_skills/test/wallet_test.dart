@@ -219,9 +219,11 @@ void main() {
       final tradeId = await acceptedTrade(credits: 200);
 
       await server.confirmCompletion(_maha, tradeId);
+      // The receiver cannot read the payer's balance; they are told why
+      // it was refused in words, never with a raw error.
       await expectLater(
         server.confirmCompletion(_sami, tradeId),
-        throwsA(TradeException.notSaved),
+        throwsA(TradeException.otherShortOfCredits),
       );
       expect(server.storedTrade(tradeId)!['status'], 'accepted');
       expect(balanceOf(_maha), _welcome);
@@ -308,6 +310,179 @@ void main() {
           member.delta,
         );
       }
+    });
+
+    /// The sum of [uid]'s stored ledger, which must always be the balance.
+    int ledgerTotal(String uid) => wallets
+        .storedEntries(uid)
+        .values
+        .fold(0, (sum, entry) => sum + (entry['amount'] as int));
+
+    test(
+      'both members confirming at the same time settle exactly once',
+      () async {
+        final tradeId = await acceptedTrade(credits: 30);
+
+        final results = await Future.wait([
+          server.confirmCompletion(_maha, tradeId),
+          server.confirmCompletion(_sami, tradeId),
+        ]);
+
+        // Exactly one of the two requests completed the trade.
+        expect(results.where((completed) => completed), hasLength(1));
+        expect(server.storedTrade(tradeId)!['status'], 'completed');
+        expect(balanceOf(_maha), _welcome + _reward - 30);
+        expect(balanceOf(_sami), _welcome + _reward + 30);
+        for (final uid in [_maha, _sami]) {
+          expect(wallets.storedEntries(uid).keys.toSet(), {
+            WalletDocument.welcomeId,
+            WalletDocument.rewardId(tradeId),
+            WalletDocument.paymentId(tradeId),
+          });
+          expect(ledgerTotal(uid), balanceOf(uid), reason: 'history = balance');
+        }
+      },
+    );
+
+    test(
+      'one member tapping twice at once confirms once and pays nothing',
+      () async {
+        final tradeId = await acceptedTrade(credits: 30);
+
+        final attempts = await Future.wait([
+          server
+              .confirmCompletion(_maha, tradeId)
+              .then<Object>((value) => value, onError: (Object error) => error),
+          server
+              .confirmCompletion(_maha, tradeId)
+              .then<Object>((value) => value, onError: (Object error) => error),
+        ]);
+
+        expect(attempts, containsAll([false, TradeException.alreadyConfirmed]));
+        expect(server.storedTrade(tradeId)!['status'], 'accepted');
+        expect((server.storedTrade(tradeId)!['completedBy'] as Map).keys, [
+          _maha,
+        ]);
+        expect(balanceOf(_maha), _welcome);
+        expect(wallets.storedEntries(_maha).keys, [WalletDocument.welcomeId]);
+      },
+    );
+
+    test('repeated completion requests from both members after completing '
+        'change nothing', () async {
+      final tradeId = await acceptedTrade(credits: 30);
+      await server.confirmCompletion(_maha, tradeId);
+      await server.confirmCompletion(_sami, tradeId);
+      final balances = [balanceOf(_maha), balanceOf(_sami)];
+
+      final retries = await Future.wait([
+        for (var i = 0; i < 3; i++)
+          for (final uid in [_maha, _sami])
+            server
+                .confirmCompletion(uid, tradeId)
+                .then<Object?>((_) => null, onError: (Object error) => error),
+      ]);
+
+      expect(retries, everyElement(isA<TradeException>()));
+      expect([balanceOf(_maha), balanceOf(_sami)], balances);
+      for (final uid in [_maha, _sami]) {
+        expect(wallets.storedEntries(uid), hasLength(3));
+        expect(ledgerTotal(uid), balanceOf(uid));
+      }
+    });
+
+    test('a refused completion changes neither wallet nor the trade', () async {
+      final tradeId = await acceptedTrade(credits: 500);
+      await server.confirmCompletion(_sami, tradeId);
+      final trade = server.storedTrade(tradeId);
+
+      await expectLater(
+        server.confirmCompletion(_maha, tradeId),
+        throwsA(TradeException.insufficientCredits),
+      );
+
+      expect(server.storedTrade(tradeId), trade, reason: 'not half saved');
+      for (final uid in [_maha, _sami]) {
+        expect(balanceOf(uid), _welcome);
+        expect(wallets.storedEntries(uid).keys, [WalletDocument.welcomeId]);
+      }
+    });
+
+    test("no member can pay into or out of someone else's wallet", () async {
+      final tradeId = await acceptedTrade(credits: 30);
+      await server.confirmCompletion(_maha, tradeId);
+      final trade = server.storedTrade(tradeId)!;
+      await wallets.openWallet(_sami);
+      await wallets.openWallet(_lina);
+
+      // Lina is not in the trade, so she can neither settle it nor be paid.
+      expect(
+        () => wallets.settle(_lina, tradeId, trade, DateTime.now()),
+        throwsA(TradeException.notFound),
+      );
+      // A group reward is only for a member of a completed group.
+      await expectLater(
+        wallets.claimGroupReward(_lina, 'group1', isCompletedMember: false),
+        throwsA(WalletException.rewardNotAdded),
+      );
+      expect(balanceOf(_lina), _welcome);
+      expect(balanceOf(_maha), _welcome);
+      expect(balanceOf(_sami), _welcome);
+    });
+
+    test(
+      'a group reward is added once, even when claimed at the same time',
+      () async {
+        await Future.wait([
+          for (var i = 0; i < 3; i++)
+            wallets.claimGroupReward(_lina, 'group1', isCompletedMember: true),
+        ]);
+
+        expect(balanceOf(_lina), _welcome + WalletDocument.groupReward);
+        expect(wallets.storedEntries(_lina).keys.toSet(), {
+          WalletDocument.welcomeId,
+          WalletDocument.groupRewardId('group1'),
+        });
+        expect(ledgerTotal(_lina), balanceOf(_lina));
+      },
+    );
+  });
+
+  group('countering a credit offer', () {
+    test(
+      'never makes the member countering pay the credits offered to them',
+      () {
+        // Sami offered Maha (the current user) 40 credits for her Baking.
+        const incoming = TradeProposal(
+          id: 'p1',
+          tradeId: 't1',
+          senderId: _sami,
+          receiverId: User.currentUserId,
+          offeredSkill: '',
+          requestedSkill: 'Baking',
+          creditsOffered: 40,
+        );
+
+        final draft = ProposalService().counterDraft(incoming);
+
+        expect(draft.creditsOffered, 0);
+        expect(draft.offeredSkill, 'Baking');
+        expect(draft.requestedSkill, '');
+      },
+    );
+
+    test('keeps the credits of the current user’s own offer', () {
+      const outgoing = TradeProposal(
+        id: 'p1',
+        tradeId: 't1',
+        senderId: User.currentUserId,
+        receiverId: _sami,
+        offeredSkill: '',
+        requestedSkill: 'Flutter',
+        creditsOffered: 40,
+      );
+
+      expect(ProposalService().counterDraft(outgoing).creditsOffered, 40);
     });
   });
 

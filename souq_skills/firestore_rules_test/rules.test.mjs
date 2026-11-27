@@ -3382,6 +3382,71 @@ describe('wallets: what the rules must refuse', () => {
     assert.deepEqual([await balanceOf(ME), await balanceOf(OTHER)], balances);
   });
 
+  test('both members confirming at the same time settle the trade exactly once', async () => {
+    const sent = await creditTrade(ME, OTHER, 30);
+    // As two devices tapping at once: each transaction reads the trade
+    // before either has written.
+    const attempts = await Promise.allSettled([
+      confirm(dbAs(ME), ME, sent.tradeId),
+      confirm(dbAs(OTHER), OTHER, sent.tradeId),
+    ]);
+    assert.ok(attempts.some((item) => item.status === 'fulfilled'), 'one confirmation is saved');
+    // A member whose attempt was refused confirms again, as the app lets them.
+    for (const [index, uid] of [ME, OTHER].entries()) {
+      if (attempts[index].status === 'rejected') await assertSucceeds(confirm(dbAs(uid), uid, sent.tradeId));
+    }
+
+    const stored = await read(`trades/${sent.tradeId}`);
+    assert.equal(stored.status, 'completed');
+    assert.equal(await balanceOf(ME), WELCOME + REWARD - 30);
+    assert.equal(await balanceOf(OTHER), WELCOME + REWARD + 30);
+    for (const uid of [ME, OTHER]) {
+      const ledger = await ledgerOf(uid);
+      assert.deepEqual(
+        Object.keys(ledger).sort(),
+        ['welcome', `${sent.tradeId}_payment`, `${sent.tradeId}_reward`].sort(),
+      );
+      const total = Object.values(ledger).reduce((sum, entry) => sum + entry.amount, 0);
+      assert.equal(total, await balanceOf(uid), 'the history adds up to the balance');
+    }
+    // Neither can confirm, pay or be paid again.
+    await assertFails(confirm(dbAs(ME), ME, sent.tradeId));
+    await assertFails(confirm(dbAs(OTHER), OTHER, sent.tradeId));
+  });
+
+  test("a confirmation written from a stale copy cannot erase the other member's", async () => {
+    const sent = await creditTrade(ME, OTHER, 30);
+    await confirm(dbAs(ME), ME, sent.tradeId);
+    const tradeRef = doc(dbAs(OTHER), 'trades', sent.tradeId);
+    // OTHER writes as if ME had not confirmed yet: without completing...
+    await assertFails(
+      updateDoc(tradeRef, {
+        completedBy: { [OTHER]: serverTimestamp() },
+        updatedAt: serverTimestamp(),
+        updatedBy: OTHER,
+      }),
+    );
+    // ...or completing with the payment but dropping ME's confirmation.
+    const db = dbAs(OTHER);
+    await assertFails(
+      runTransaction(db, async (transaction) => {
+        const trade = (await transaction.get(doc(db, 'trades', sent.tradeId))).data();
+        transaction.update(doc(db, 'trades', sent.tradeId), {
+          completedBy: { [OTHER]: serverTimestamp() },
+          status: 'completed',
+          updatedAt: serverTimestamp(),
+          updatedBy: OTHER,
+        });
+        applySettlement(transaction, db, sent.tradeId, settlementOf(sent.tradeId, trade));
+      }),
+    );
+    const stored = await read(`trades/${sent.tradeId}`);
+    assert.deepEqual(Object.keys(stored.completedBy), [ME]);
+    assert.equal(stored.status, 'accepted');
+    assert.equal(await balanceOf(ME), WELCOME);
+    assert.equal(await balanceOf(OTHER), WELCOME);
+  });
+
   test('completing when the payer cannot pay, or without the other wallet', async () => {
     const sent = await creditTrade(ME, OTHER, 200);
     await confirm(dbAs(ME), ME, sent.tradeId);

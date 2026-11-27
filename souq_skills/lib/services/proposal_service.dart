@@ -27,10 +27,15 @@ class ProposalService {
       isIncoming(proposal) ? proposal.senderId : proposal.receiverId;
 
   /// The current user's side of a counteroffer to [proposal].
+  ///
+  /// Credits are paid by whoever writes the terms, so the other member's
+  /// credit offer is never carried over as credits the current user would
+  /// pay: they start from offering the skill that was asked for.
   TradeProposal counterDraft(TradeProposal proposal) => isIncoming(proposal)
       ? proposal.copyWith(
           offeredSkill: proposal.requestedSkill,
           requestedSkill: proposal.offeredSkill,
+          creditsOffered: 0,
         )
       : proposal;
 

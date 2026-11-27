@@ -94,8 +94,12 @@ class MemberSimulator {
     });
   }
 
-  void _later(void Function() action, {Duration delay = replyDelay}) =>
-      Timer(delay, () {
-        if (_repo.isSignedIn) action();
-      });
+  /// Runs [action] after [delay], only if the same account is still signed
+  /// in: a reply meant for one account never lands in another's data.
+  void _later(void Function() action, {Duration delay = replyDelay}) {
+    final account = AuthService.repository.uid;
+    Timer(delay, () {
+      if (_repo.isSignedIn && AuthService.repository.uid == account) action();
+    });
+  }
 }

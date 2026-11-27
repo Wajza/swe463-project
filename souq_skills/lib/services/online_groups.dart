@@ -9,6 +9,7 @@ import 'package:souq_skills/models/notification.dart';
 import 'package:souq_skills/models/user.dart';
 
 import 'auth_service.dart';
+import 'badge_service.dart';
 import 'chat_service.dart';
 import 'member_service.dart';
 import 'notification_service.dart';
@@ -166,6 +167,10 @@ class OnlineGroups {
       // Only what changes while listening; older groups are just shown.
       if (wasLoaded) _notifyChange(uid, previous[group.id], group);
     }
+    // Joining, leaving or completing a group changes the Community Builder
+    // badge and XP. Groups from before this sign-in are only recorded, so
+    // badges earned earlier are not announced again.
+    BadgeService().sync(announce: wasLoaded);
     Repository.instance.emitChange();
   }
 
@@ -309,7 +314,8 @@ class OnlineGroups {
     } on GroupTradeException {
       // Tried again later.
     } finally {
-      _claiming.remove(groupId);
+      // After an account switch, [_claiming] belongs to the new account.
+      if (_isCurrent(uid)) _claiming.remove(groupId);
     }
   }
 

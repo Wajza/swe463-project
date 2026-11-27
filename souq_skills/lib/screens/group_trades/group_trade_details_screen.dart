@@ -46,6 +46,10 @@ class _GroupTradeDetailsScreenState extends State<GroupTradeDetailsScreen> {
     } on GroupTradeException catch (error) {
       if (mounted) context.showMessage(error.message);
       return false;
+    } on Exception {
+      // Never a raw error, and never stuck saving.
+      if (mounted) context.showMessage('Something went wrong. Try again.');
+      return false;
     } finally {
       if (mounted) setState(() => _busy = false);
     }

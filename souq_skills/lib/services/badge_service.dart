@@ -24,10 +24,12 @@ class BadgeService {
     final listings = _repo.listings
         .where((listing) => listing.ownerId == User.currentUserId)
         .length;
-    final groups = GroupTradeService()
-        .all()
-        .where(GroupTradeService().isMember)
-        .length;
+    // Each group the member belongs to once, by id: online and on this
+    // device, never cancelled ones or mere invitations.
+    final groups = {
+      for (final group in GroupTradeService().all())
+        if (GroupTradeService().isMember(group)) group.id,
+    }.length;
 
     return [
       AchievementBadge(
@@ -81,10 +83,18 @@ class BadgeService {
     ];
   }
 
-  /// Announces any badge that became earned since the last check.
-  void sync() {
+  /// Whether everything badges are worked out from has arrived, so their
+  /// progress is final rather than still loading.
+  bool get isLoaded =>
+      TradeService().isLoaded && !GroupTradeService().loadStatus.isLoading;
+
+  /// Announces any badge that became earned since the last check. With
+  /// [announce] false, as when an account's records first arrive, badges
+  /// earned earlier are only recorded, so they are not announced again.
+  void sync({bool announce = true}) {
     for (final badge in badges()) {
-      if (badge.isEarned && _repo.awardedBadgeIds.add(badge.id)) {
+      if (!badge.isEarned || !_repo.awardedBadgeIds.add(badge.id)) continue;
+      if (announce) {
         NotificationService().push(
           title: 'Badge earned: ${badge.title}',
           message: badge.description,

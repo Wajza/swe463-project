@@ -40,8 +40,13 @@ class ProfileScreen extends StatelessWidget {
     alsoListenTo: [ListingService.loadState, ReviewService.loadStates],
     builder: (context) {
       final reviews = ReviewService();
-      final badges = BadgeService().badges();
+      final badgeService = BadgeService();
+      final badges = badgeService.badges();
       final earned = badges.where((badge) => badge.isEarned).length;
+      // Never a provisional count while trades or group trades load.
+      final badgeCount = badgeService.isLoaded
+          ? '$earned/${badges.length}'
+          : '…';
       final latest = reviews.latestForCurrentUser(limit: 3);
       final user = ProfileService().currentUser;
       final experience = ExperienceService();
@@ -98,7 +103,7 @@ class ProfileScreen extends StatelessWidget {
           SkillChips(skills: user.skillsOffered),
           const SectionHeader(title: 'I want to learn'),
           SkillChips(skills: user.skillsWanted),
-          SectionHeader(title: 'Badges ($earned/${badges.length})'),
+          SectionHeader(title: 'Badges ($badgeCount)'),
           BadgeStrip(badges: badges),
           const SectionHeader(title: 'Ratings and reviews'),
           RatingSummary(

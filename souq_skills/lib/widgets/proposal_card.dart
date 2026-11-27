@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:souq_skills/core/app_routes.dart';
 import 'package:souq_skills/core/navigation.dart';
+import 'package:souq_skills/models/trade.dart';
 import 'package:souq_skills/models/trade_proposal.dart';
 import 'package:souq_skills/services/member_service.dart';
 import 'package:souq_skills/services/proposal_service.dart';
+import 'package:souq_skills/services/trade_service.dart';
 
 import 'trade_action.dart';
 
@@ -57,6 +59,22 @@ class ProposalCard extends StatelessWidget {
     ];
   }
 
+  /// A proposal stays Accepted once accepted, so an accepted one shows how
+  /// its trade has moved on since: Completed or Disputed. Otherwise, and
+  /// while the trade is still accepted or not loaded yet, the proposal's
+  /// own status.
+  StatusChip _statusChip() {
+    if (proposal.status == ProposalStatus.accepted) {
+      final trade = TradeService().byId(proposal.tradeId);
+      if (trade != null &&
+          (trade.status == TradeStatus.completed ||
+              trade.status == TradeStatus.disputed)) {
+        return StatusChip.trade(trade.status);
+      }
+    }
+    return StatusChip.proposal(proposal.status);
+  }
+
   @override
   Widget build(BuildContext context) {
     final service = ProposalService();
@@ -76,7 +94,7 @@ class ProposalCard extends StatelessWidget {
               '$direction • ${proposal.sessionsMinutes} min • '
               '${proposal.deliveryMethod}',
             ),
-            trailing: StatusChip.proposal(proposal.status),
+            trailing: _statusChip(),
           ),
           if (actions.isNotEmpty)
             Padding(

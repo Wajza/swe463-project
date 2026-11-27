@@ -81,23 +81,50 @@ The app opens on the welcome screen and connects to the team's Firebase project 
 
 ### Android release APK
 
+The submitted APK is a release build signed with the team's own release key, for installing directly on a phone (sideloading). It is not published on the Play Store.
+
+**1. Release key (once per team).** Create a keystore *outside* the repository and keep a backup: an update to an installed APK must be signed with the same key.
+
+```bash
+keytool -genkeypair -v -keystore C:/Users/<you>/.souq-skills/souq-skills-release.jks -storetype PKCS12 -alias souq_skills -keyalg RSA -keysize 2048 -validity 10000
+```
+
+Then create `souq_skills/android/key.properties` pointing at it:
+
+```properties
+storeFile=C:/Users/<you>/.souq-skills/souq-skills-release.jks
+storePassword=<keystore password>
+keyAlias=souq_skills
+keyPassword=<key password>
+```
+
+Never commit `key.properties`, the keystore or its passwords; `android/.gitignore` already ignores `key.properties`, `*.jks` and `*.keystore`. Without `key.properties`, release builds fall back to the debug key, which is only suitable for local testing.
+
+**2. Build.**
+
 ```bash
 cd souq_skills
+flutter pub get
+flutter analyze
 flutter build apk --release
 # build/app/outputs/flutter-apk/app-release.apk
 ```
 
-- Needs `android/app/google-services.json` (see *Firebase setup*). The application id is `com.example.souq_skills`, the one registered in Firebase; changing it needs a new Android app in the Firebase Console and a new `google-services.json`.
-- **Signing:** without `android/key.properties`, the release APK is signed with the debug key. That is fine for installing and testing, but not for the Play Store. To sign with the team's upload key, create `android/key.properties` (never commit it, or the keystore; both are in `android/.gitignore`):
+**3. Verify the signature** (Android SDK build-tools):
 
-  ```properties
-  storeFile=C:/path/to/upload-keystore.jks
-  storePassword=...
-  keyAlias=upload
-  keyPassword=...
-  ```
+```bash
+apksigner verify --verbose --print-certs build/app/outputs/flutter-apk/app-release.apk
+```
 
-- Phone sign-in on a device needs the SHA-1 and SHA-256 fingerprints of the key that signed the APK (debug or upload key) in the Firebase Console.
+It should print `Verifies` and the release certificate (`CN=Souq Skills`), not `CN=Android Debug`.
+
+**4. Install** on a phone with USB debugging (`adb install app-release.apk`), or copy the file to the phone and allow installing from that source.
+
+**Notes**
+
+- The build needs `android/app/google-services.json` (see *Firebase setup*). The application id stays `com.example.souq_skills`, the one registered in Firebase; changing it needs a new Android app in the Firebase Console and a new `google-services.json`.
+- **Phone sign-in:** add the release key's SHA-1 and SHA-256 fingerprints (from the `apksigner` output, or `keytool -list -v -keystore <keystore>`) to Firebase Console → Project settings → Your apps → Android app, then download the updated `google-services.json` and rebuild. Without them, phone sign-in in the release APK can fail on a device.
+- **Emulators:** on some Android emulators with integrated host GPUs, Flutter's default Impeller renderer draws text and icons incompletely. The same build renders correctly with the Skia renderer, so this is an emulator graphics issue; check the APK on a real phone.
 
 ### Test accounts
 

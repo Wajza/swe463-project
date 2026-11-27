@@ -79,6 +79,26 @@ The app opens on the welcome screen and connects to the team's Firebase project 
   - Without these, run the app in Chrome instead.
 - **Project owners only:** the Phone sign-in provider must be enabled in the Firebase Console, and the Firestore rules deployed (see *Security rules*).
 
+### Android release APK
+
+```bash
+cd souq_skills
+flutter build apk --release
+# build/app/outputs/flutter-apk/app-release.apk
+```
+
+- Needs `android/app/google-services.json` (see *Firebase setup*). The application id is `com.example.souq_skills`, the one registered in Firebase; changing it needs a new Android app in the Firebase Console and a new `google-services.json`.
+- **Signing:** without `android/key.properties`, the release APK is signed with the debug key. That is fine for installing and testing, but not for the Play Store. To sign with the team's upload key, create `android/key.properties` (never commit it, or the keystore; both are in `android/.gitignore`):
+
+  ```properties
+  storeFile=C:/path/to/upload-keystore.jks
+  storePassword=...
+  keyAlias=upload
+  keyPassword=...
+  ```
+
+- Phone sign-in on a device needs the SHA-1 and SHA-256 fingerprints of the key that signed the APK (debug or upload key) in the Firebase Console.
+
 ### Test accounts
 
 | Account | Phone number (without +966) | Verification code |
@@ -123,7 +143,7 @@ flutter analyze
 flutter test
 ```
 
-`flutter test` needs no Firebase connection. Without an initialized Firebase app, the app uses in-memory stand-ins for each Firebase repository (for example `DemoAuthRepository`, `DemoProfileRepository`, `DemoListingRepository`, `DemoTradeRepository`, `DemoWalletRepository`, `DemoChatRepository`), and the tests that cover Firestore behaviour inject them directly. On 26 Nov 2026, all 457 tests passed.
+`flutter test` needs no Firebase connection. Without an initialized Firebase app, the app uses in-memory stand-ins for each Firebase repository (for example `DemoAuthRepository`, `DemoProfileRepository`, `DemoListingRepository`, `DemoTradeRepository`, `DemoWalletRepository`, `DemoChatRepository`), and the tests that cover Firestore behaviour inject them directly. On 27 Nov 2026, all 552 tests passed.
 
 | Test file | Covers |
 |---|---|
@@ -151,15 +171,16 @@ flutter test
 | `test/ratings_test.dart` | Rating a real member online first, failures and retry, rating once, loading and refreshing ratings, visibility, deleted accounts, rating badges |
 | `test/chat_test.dart` | Conversation ids and message validation, both members seeing the same chat, live replies, unread counts and notifications, blocking, account switching, demo members |
 | `test/trades_test.dart` | Proposals, counteroffers, accepting, declining and cancelling between two members, sessions, completion only after both confirm, live updates, blocking, demo members, offline mode |
-| `test/wallet_test.dart` | Opening a wallet with the welcome credits, settlement on completion, who pays, short balances, no double payment, live balance, account switching |
-| `test/group_trades_test.dart` | Group trades online: invitations, completion once every member confirms, rewards, leaving and removal, the group chat, account switching |
+| `test/wallet_test.dart` | Opening a wallet with the welcome credits, settlement on completion, who pays, short balances, no double payment, both members or one member confirming at the same time, refused completions changing nothing, members outside a trade, group rewards claimed at once, the ledger always adding up to the balance, countering a credit offer, live balance, account switching |
+| `test/group_trades_test.dart` | Group trades online: invitations, completion once every member confirms, rewards, leaving and removal, the group chat, the Community Builder badge count, account switching |
+| `test/account_switch_and_trade_action_test.dart` | Demo-member replies never reaching the next account; trade changes showing progress, refusing a second tap, explaining failures in words and never staying stuck loading |
 | `test/notifications_test.dart` | Notifications for group trades, proposals, counteroffers, sessions and completions; settings and blocks respected; opening and marking notifications read |
 | `test/trade_details_reschedule_test.dart` | Rescheduling a session from the trade's session card |
 | `test/frontend_a_integration_test.dart` | Skill credits explanation, wallet totals and transaction details, listing reviews page, published screen, profile skills, Safety Centre |
 
 ### Firestore security rules
 
-The rules in `firestore.rules` are tested against the Firestore emulator. This needs Node.js, Java 21 or newer, and the Firebase CLI. It runs against a local `demo-` project, so nothing reaches the real one. On 26 Nov 2026, all 216 rules tests passed (0 failed) on `main` at commit `883ddf5`.
+The rules in `firestore.rules` are tested against the Firestore emulator. This needs Node.js, Java 21 or newer, and the Firebase CLI. It runs against a local `demo-` project, so nothing reaches the real one. On 27 Nov 2026, all 218 rules tests passed (0 failed), including both members confirming a trade at the same time and stale confirmations.
 
 ```bash
 cd souq_skills

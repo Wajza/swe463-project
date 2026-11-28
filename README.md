@@ -6,7 +6,7 @@ Souq Skills is a Flutter marketplace where members in Saudi Arabia trade skills 
 
 **Documentation reviewed:** 28 November 2026 against `main` at [`ef5de41`](https://github.com/Wajza/swe463-project/commit/ef5de4108c6c65acab7aaa671adaf6ad9f0e35fd). Feature descriptions below describe the implementation in that revision; deployment and test evidence have their own dates and commits.
 
-**Release status:** the historical `phase-3` tag exists. The required `final-submission` tag and the final APK download link are **pending** in this README. Create the final tag only after the team verifies the submitted revision; then add its exact commit, release/APK link if required, and final test results. The screenshot gallery is also pending capture (see [Screenshots](#screenshots)).
+**Release status:** the historical `phase-3` tag exists. The required `final-submission` tag and the final APK download link are **pending** in this README. Create the final tag only after the team verifies the submitted revision; then add its exact commit, release/APK link if required, and final test results. The screenshot gallery is available under [Screenshots](#screenshots).
 
 ## Team
 
@@ -65,30 +65,69 @@ All eight features below are implemented in the reviewed code. This is a code-le
 
 ## Screenshots
 
-**Pending capture.** Current-version screenshots have not yet been added to the repository. Capture the running reviewed/final application, not Figma, and place the images in `docs/screenshots/` at the repository root. Use the same phone-sized viewport and theme for the main set. The Wallet screen must be included. Detailed capture steps are in the [screenshot guide](docs/screenshots/README.md).
+Screenshots of the running Souq Skills application in Chrome on macOS. These images document the captured interface; automated test results are recorded separately in the Testing section.
 
-| File | Capture |
-|---|---|
-| `01-home.png` | Home with listings, search and filters visible. |
-| `02-listing-details.png` | Another member's listing, offered/requested skills and Propose a trade action. |
-| `03-post-validation.png` | Post a skill after pressing Publish with required selections missing; show the real validation messages. |
-| `04-chat-proposal.png` | Direct chat with a proposal/counteroffer card and its current status. |
-| `05-completed-trade.png` | A completed trade showing its status, timeline and rating action or saved rating. |
-| `06-rate-experience.png` | The rating form for an eligible completed exchange. |
-| `07-wallet.png` | Loaded Wallet showing balance and transaction history; use test-account data. |
-| `08-profile-xp.png` | Profile with level/XP progress, rating/credits and skills. |
-| `09-badges.png` | Badges with requirements and actual progress. |
-| `10-group-trade.png` | Group details with members and invitation/completion state. |
+See the [screenshot index](docs/screenshots/README.md).
 
-Optional supporting images: `11-settings-privacy.png`, `12-safety-centre.png`, `13-wallet-transaction.png`, `14-home-wide.png`, and `15-test-results.png`. Loading/failure screenshots are useful when reproducible; cached Firestore data may prevent a live offline error. Automated error tests are documented separately.
+### Home
 
-After the files are present, replace the capture table with the actual gallery. Example syntax for a file that has been added:
+Skill listings, search, filters and navigation.
 
-```html
-<img src="docs/screenshots/07-wallet.png" alt="Loaded Wallet with credit balance and transaction history" width="300">
-```
+<img src="docs/screenshots/01-home.png" alt="Skill listings, search, filters and navigation" width="300">
 
-Recheck that every image loads on GitHub and corresponds to the final submitted version. Do not substitute mockups or label an automated simulated failure as a manually observed live-service failure.
+### Listing details
+
+Selected listing and trade proposal action.
+
+<img src="docs/screenshots/02-listing-details.png" alt="Selected listing and trade proposal action" width="300">
+
+### Posting validation
+
+Required-field validation in the posting form.
+
+<img src="docs/screenshots/03-post-validation.png" alt="Required-field validation in the posting form" width="300">
+
+### Chat and proposal
+
+Trade conversation and proposal state.
+
+<img src="docs/screenshots/04-chat-proposal.png" alt="Trade conversation and proposal state" width="300">
+
+### Completed trade
+
+Completed exchange and its result.
+
+<img src="docs/screenshots/05-completed-trade.png" alt="Completed exchange and its result" width="300">
+
+### Rate an experience
+
+Rating form for an eligible completed exchange.
+
+<img src="docs/screenshots/06-rate-experience.png" alt="Rating form for an eligible completed exchange" width="300">
+
+### Skill wallet
+
+Loaded credit balance and transaction history.
+
+<img src="docs/screenshots/07-wallet.png" alt="Loaded credit balance and transaction history" width="300">
+
+### Profile and XP
+
+Profile information, level and XP.
+
+<img src="docs/screenshots/08-profile-xp.png" alt="Profile information, level and XP" width="300">
+
+### Badges
+
+Badge progress and requirements.
+
+<img src="docs/screenshots/09-badges.png" alt="Badge progress and requirements" width="300">
+
+### Group trade
+
+Group members and invitation or completion state.
+
+<img src="docs/screenshots/10-group-trade.png" alt="Group members and invitation or completion state" width="300">
 
 ## Run the app
 
@@ -474,7 +513,7 @@ Versions follow `pubspec.lock` and `firestore_rules_test/package-lock.json`. The
 - Other Dart packages: [shared_preferences 2.5.6](https://pub.dev/packages/shared_preferences/versions/2.5.6/license), [geolocator 14.1.2](https://pub.dev/packages/geolocator/versions/14.1.2/license), [flutter_lints 6.0.0](https://pub.dev/packages/flutter_lints/versions/6.0.0/license).
 - Rules-test dependencies: [Firebase JavaScript SDK](https://github.com/firebase/firebase-js-sdk) and its [Apache 2.0 license](https://github.com/firebase/firebase-js-sdk/blob/main/LICENSE); locked npm package metadata is in `souq_skills/firestore_rules_test/package-lock.json`.
 - Material icons are used through Flutter (`uses-material-design: true`); the upstream [Material Design Icons license](https://github.com/google/material-design-icons/blob/master/LICENSE) is Apache 2.0.
-- The app's generated/sample member and listing records are defined in `souq_skills/lib/services/seed_data.dart`; these are demo data, not evidence of real exchanges. Runtime screenshots in the future gallery must be captured by the team.
+- The app's generated/sample member and listing records are defined in `souq_skills/lib/services/seed_data.dart`; these are demo data, not evidence of real exchanges. Runtime screenshots are included in the Screenshots section.
 
 ## Known issues and limitations
 
@@ -517,7 +556,7 @@ The same fields are used for each member. Code history supports implementation a
 
 | Member | Phase 3 work | Phase 4 work | Evidence |
 |---|---|---|---|
-| Wajd Alghamdi (202262140) | Trading/support screens and services; frontend rebuild, shared components, navigation, selection-based forms and local persistence. | Feedback fixes and UI load/error states; XP/level presentation from existing activity; online dispute connection; integration and demo coordination. Captured the flow screenshots supplied in the team report. | **Code:** `571dc10`, `00f3c80`, `a01d22c`, `de61207`, `ace4b58`. **Other evidence:** flow screenshots in the team report and `DEMO.md`; these screenshots are not yet the pending README gallery. |
+| Wajd Alghamdi (202262140) | Trading/support screens and services; frontend rebuild, shared components, navigation, selection-based forms and local persistence. | Feedback fixes and UI load/error states; XP/level presentation from existing activity; online dispute connection; integration and demo coordination. Captured the flow screenshots supplied in the team report. | **Code:** `571dc10`, `00f3c80`, `a01d22c`, `de61207`, `ace4b58`. **Other evidence:** flow screenshots in the team report and `DEMO.md`; report screenshots and the README gallery are separate evidence sets. |
 | Yasmeen Alshehri (202271660) | Firebase configuration; phone authentication; profiles/skills, unique usernames, listings, public profiles, blocking, reports, ratings and security rules. | Per-exchange and group-participant ratings with eligibility rules and legacy compatibility; persistent privacy choices; profile/listing integrity; profile refresh, rating loading and proposal-status fixes; regression tests and documentation. XP logic was implemented separately. | **Phase 3:** `3d323a2`, `8fa97f1`, `4f4090e`, `775a745`, `ed5d376`, `7d9b96e`, `6bd3b9e`; PR #2. **Phase 4:** `c66e23a`, `1a5ab02`, `284d87a`, `8f73981`, `f8d1ecd`, `acb5a47`, `238f593`, `d8f5854`; PRs #4–5. **Recorded tests:** at `9f4119b`, 533 Flutter and 216 rules tests passed; analysis had no issues. |
 | Fatimah Alshehab (202278660) | Firebase direct/group chat, proposals/trades/sessions, wallet and credits, group trades and in-app notifications. | Wallet settlement, account isolation and group-badge reliability; trade-action loading/errors; Android signing/release configuration and documented emulator checks; Enter-key submission, keyboard actions, focus movement and duplicate-submit prevention; automated tests and documentation. | **Phase 3:** `80db108`, `b4783f7`, `f53b9dd`, `82450d8`, `85bf3c4`. **Phase 4:** `14b5c31`, `aba5dc7`, `3491219`, `dc2aa23`, `e31a5b3`, `42b5638`. **Recorded tests:** at `42b5638`, 557 Flutter tests passed; analysis had no issues. Android signature/install/launch/phone sign-in checked on an emulator, not a physical Android device (team-reported). Git name `xfas51` is linked to Fatimah-Alshehab. |
 | Raghad Almaghrabi (202156390) | Assigned Profile/editing/privacy/preferences, Badges, listing details/reviews, posting/owned-listing management, Wallet interactions, Safety Centre and shared frontend state on `phase3/frontend`; compatible work integrated into `main`. | UI and form/navigation checks in phone-sized and wide Chrome layouts on a Mac; verification of existing My Trades/Wallet state fixes; analysis, targeted tests and full Flutter suite; report testing/contribution evidence. No new code fix was needed during those checks. | **Phase 3:** 16 commits from `f50079c` to `91bbf2a`; co-author of integration `3529049`, PR #3. **Phase 4 verification:** `ace4b58`, 26 November 2026: analysis had no issues, 4 targeted tests and 457 full-suite tests passed. Manual results and terminal screenshot are in the team report. These results predate later Phase 4 code changes. |
